@@ -1,11 +1,15 @@
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { api } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import StatCard from '@/components/ui/StatCard';
-import { Users, GraduationCap, Wallet, Target, TrendingUp, CalendarDays } from 'lucide-react';
+import { Users, GraduationCap, Wallet, Target, TrendingUp, CalendarDays, ClipboardList, Clock, AlertTriangle } from 'lucide-react';
 import { fmtMoney, fmtDateTime } from '@/lib/format';
 import { useAuth } from '@/stores/auth';
 import { ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar } from 'recharts';
+import { isBefore, isToday, parseISO, format } from 'date-fns';
+import { ru } from 'date-fns/locale';
+import clsx from 'clsx';
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -84,6 +88,63 @@ export default function DashboardPage() {
             ))}
           </ul>
         </div>
+      </div>
+
+      {/* My tasks widget */}
+      <div className="card p-5 mt-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+            <ClipboardList size={18} className="text-brand-600" /> Мои задачи
+            {!!data?.overdueTasks && (
+              <span className="badge-red ml-1">
+                <AlertTriangle size={10} className="inline mr-0.5" /> {data.overdueTasks} просрочено
+              </span>
+            )}
+          </h3>
+          <Link to="/tasks" className="text-sm text-brand-600 hover:underline">Все задачи →</Link>
+        </div>
+        {(data?.myTasks || []).length === 0 ? (
+          <div className="text-sm text-emerald-700 bg-emerald-50 rounded-lg p-4 text-center">
+            🎉 У вас нет открытых задач. Создайте новую в разделе «Задачи и планы».
+          </div>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {(data?.myTasks || []).map(t => {
+              const overdue = !!t.due_at && isBefore(parseISO(t.due_at), new Date());
+              const today  = !!t.due_at && isToday(parseISO(t.due_at));
+              return (
+                <li key={t.id} className={clsx('py-3 flex items-center justify-between gap-3', overdue && 'text-rose-700')}>
+                  <div className="flex items-center gap-3 min-w-0">
+                    {t.kind === 'plan'
+                      ? <Target size={16} className="text-violet-500 flex-shrink-0" />
+                      : <ClipboardList size={16} className="text-slate-400 flex-shrink-0" />}
+                    <div className="min-w-0">
+                      <div className={clsx('font-medium truncate', overdue ? 'text-rose-700' : 'text-slate-900')}>{t.title}</div>
+                      {t.due_at && (
+                        <div className={clsx('text-xs flex items-center gap-1 mt-0.5', overdue ? 'text-rose-600' : today ? 'text-amber-600' : 'text-slate-500')}>
+                          <Clock size={11} />
+                          {format(parseISO(t.due_at), 'd MMM, HH:mm', { locale: ru })}
+                          {overdue && ' · просрочено'}
+                          {today && !overdue && ' · сегодня'}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <span className={clsx(
+                    'badge',
+                    t.priority === 'urgent' ? 'badge-red' :
+                    t.priority === 'high'   ? 'badge-amber' :
+                    t.priority === 'low'    ? 'badge-slate' : 'badge-blue',
+                  )}>
+                    {t.priority === 'urgent' ? 'Срочный' :
+                     t.priority === 'high'   ? 'Высокий' :
+                     t.priority === 'low'    ? 'Низкий'  : 'Обычный'}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
     </div>
   );

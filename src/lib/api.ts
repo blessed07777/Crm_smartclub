@@ -1,4 +1,4 @@
-import type { Profile, Subject, Lead, Student, Group, Lesson, Payment, Attendance, UserRole } from '@/types/database';
+import type { Profile, Subject, Lead, Student, Group, Lesson, Payment, Attendance, UserRole, Task } from '@/types/database';
 
 const TOKEN_KEY = 'smartclub_token';
 
@@ -105,6 +105,7 @@ export const api = {
       call<Attendance>(`/api/lessons/${lessonId}/attendance`, { method: 'PUT', body: JSON.stringify(data) }),
   },
   payments: crud<Payment>('/api/payments'),
+  tasks:    crud<Task>('/api/tasks'),
 
   dashboard: {
     stats: () => call<{
@@ -114,6 +115,8 @@ export const api = {
       finance30: { income: number; expense: number; net: number };
       upcoming: { id: string; group_id: string; starts_at: string; topic: string | null }[];
       daily: { day: string; kind: string; total: number }[];
+      myTasks: { id: string; title: string; due_at: string | null; priority: string; status: string; kind: string }[];
+      overdueTasks: number;
     }>('/api/dashboard/stats'),
   },
 

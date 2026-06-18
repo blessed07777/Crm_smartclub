@@ -4,15 +4,18 @@ import { useAuth } from '@/stores/auth';
 import {
   LayoutDashboard, Users, GraduationCap, CalendarDays, ClipboardCheck,
   Wallet, UserCog, BarChart3, Settings, LogOut, Menu, X, Target, Briefcase,
+  CalendarRange, ClipboardList,
 } from 'lucide-react';
 import clsx from 'clsx';
 
 const nav = [
   { to: '/', label: 'Дашборд', icon: LayoutDashboard, roles: ['admin','manager','teacher'] },
   { to: '/workspace', label: 'Мой кабинет', icon: Briefcase, roles: ['admin','manager'] },
+  { to: '/tasks', label: 'Задачи и планы', icon: ClipboardList, roles: ['admin','manager','teacher'] },
   { to: '/leads', label: 'Лиды', icon: Target, roles: ['admin','manager'] },
   { to: '/students', label: 'Ученики', icon: Users, roles: ['admin','manager','teacher'] },
   { to: '/groups', label: 'Группы', icon: GraduationCap, roles: ['admin','manager','teacher'] },
+  { to: '/calendar', label: 'Календарь', icon: CalendarRange, roles: ['admin','manager','teacher'] },
   { to: '/schedule', label: 'Расписание', icon: CalendarDays, roles: ['admin','manager','teacher'] },
   { to: '/attendance', label: 'Посещаемость', icon: ClipboardCheck, roles: ['admin','manager','teacher'] },
   { to: '/finance', label: 'Финансы', icon: Wallet, roles: ['admin','manager'] },

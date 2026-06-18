@@ -3,6 +3,26 @@ export type LeadStatus = 'new' | 'contacted' | 'trial' | 'negotiation' | 'won' |
 export type StudentStatus = 'active' | 'frozen' | 'archived' | 'graduated';
 export type PaymentKind = 'income' | 'expense' | 'payout' | 'refund';
 export type AttendanceStatus = 'present' | 'absent' | 'late' | 'excused';
+export type TaskKind = 'task' | 'plan';
+export type TaskStatus = 'open' | 'in_progress' | 'done' | 'canceled';
+export type TaskPriority = 'low' | 'normal' | 'high' | 'urgent';
+
+export interface Task {
+  id: string;
+  title: string;
+  description: string | null;
+  kind: TaskKind;
+  status: TaskStatus;
+  priority: TaskPriority;
+  due_at: string | null;
+  assigned_to: string | null;
+  created_by: string | null;
+  related_type: string | null;
+  related_id: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
 
 export interface Profile {
   id: string;

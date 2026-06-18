@@ -254,6 +254,21 @@ app.use('/api/payments', resource({
   read: ['admin','manager'], write: ['admin','manager'],
 }));
 
+// Tasks: auto-default assigned_to and created_by to the calling user
+app.post('/api/tasks', requireAuth, (req, _res, next) => {
+  if (req.body) {
+    if (!req.body.assigned_to) req.body.assigned_to = req.user!.uid;
+    req.body.created_by = req.user!.uid;
+  }
+  next();
+});
+app.use('/api/tasks', resource({
+  table: 'tasks',
+  fields: ['title','description','kind','status','priority','due_at','assigned_to','created_by','related_type','related_id','completed_at'],
+  defaultOrder: 'due_at',
+  read: ['admin','manager','teacher'], write: ['admin','manager','teacher'],
+}));
+
 // ============================================================
 // USERS (custom — role gating, no password fields exposed)
 // ============================================================
@@ -437,7 +452,8 @@ app.put('/api/lessons/:id/attendance', requireAuth, async (req, res) => {
 // ============================================================
 // DASHBOARD + REPORTS
 // ============================================================
-app.get('/api/dashboard/stats', requireAuth, async (_req, res) => {
+app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
+  const uid = req.user!.uid;
   const sinceDate = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
   const [a, l, g, p, u] = await Promise.all([
     q1(`select
@@ -460,6 +476,24 @@ app.get('/api/dashboard/stats', requireAuth, async (_req, res) => {
      from payments where paid_at >= $1
      group by 1, 2 order by 1`, [sinceDate],
   );
+
+  const myTasks = await q(
+    `select id, title, due_at, priority, status, kind
+     from tasks
+     where assigned_to = $1 and status in ('open','in_progress')
+     order by
+       case when due_at is null then 1 else 0 end,
+       due_at asc
+     limit 8`,
+    [uid],
+  );
+  const overdueCount = await q1<{ c: number | string }>(
+    `select count(*)::int as c from tasks
+     where assigned_to = $1 and status in ('open','in_progress')
+     and due_at is not null and due_at < now()`,
+    [uid],
+  );
+
   res.json({
     students: a,
     leads: l,
@@ -467,6 +501,8 @@ app.get('/api/dashboard/stats', requireAuth, async (_req, res) => {
     finance30: { income, expense, net: income - expense },
     upcoming: u,
     daily,
+    myTasks,
+    overdueTasks: Number(overdueCount?.c ?? 0),
   });
 });
 
