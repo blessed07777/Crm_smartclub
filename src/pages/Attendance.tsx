@@ -1,13 +1,12 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
-import type { Lesson, Student, AttendanceStatus, Attendance } from '@/types/database';
+import { api } from '@/lib/api';
+import type { Lesson, AttendanceStatus } from '@/types/database';
 import PageHeader from '@/components/ui/PageHeader';
 import EmptyState from '@/components/ui/EmptyState';
 import { ClipboardCheck, Check, X, Clock, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { fmtDateTime } from '@/lib/format';
-import { useAuth } from '@/stores/auth';
 
 const STATUS: { value: AttendanceStatus; label: string; icon: any; tone: string }[] = [
   { value: 'present', label: 'Был',     icon: Check,       tone: 'bg-emerald-100 text-emerald-700 border-emerald-300' },
@@ -18,42 +17,18 @@ const STATUS: { value: AttendanceStatus; label: string; icon: any; tone: string 
 
 export default function AttendancePage() {
   const qc = useQueryClient();
-  const { profile } = useAuth();
   const [lessonId, setLessonId] = useState<string>('');
 
-  const lessonsQ = useQuery({ queryKey: ['lessons-recent'], queryFn: async () => {
-    const { data, error } = await supabase.from('lessons').select('*').order('starts_at', { ascending: false }).limit(50);
-    if (error) throw error; return data as Lesson[];
-  }});
-
+  const lessonsQ = useQuery({ queryKey: ['lessons-recent'], queryFn: () => api.lessons.list({ orderBy: 'starts_at', order: 'desc', limit: 50 }) });
   const rosterQ = useQuery({
     queryKey: ['lesson-roster', lessonId],
     enabled: !!lessonId,
-    queryFn: async () => {
-      const lesson = lessonsQ.data?.find(l => l.id === lessonId);
-      if (!lesson) return { students: [] as Student[], attendance: [] as Attendance[] };
-      const { data: roster } = await supabase
-        .from('group_students')
-        .select('students!inner(*)')
-        .eq('group_id', lesson.group_id);
-      const students = (roster || []).map((r: any) => r.students) as Student[];
-      const { data: att } = await supabase.from('attendance').select('*').eq('lesson_id', lessonId);
-      return { students, attendance: (att || []) as Attendance[] };
-    },
+    queryFn: () => api.lessons.rosterWithAttendance(lessonId),
   });
 
   const mark = useMutation({
-    mutationFn: async ({ studentId, status, score }: { studentId: string; status: AttendanceStatus; score?: number | null }) => {
-      const { error } = await supabase.from('attendance').upsert({
-        lesson_id: lessonId,
-        student_id: studentId,
-        status,
-        score: score ?? null,
-        recorded_by: profile?.id,
-        recorded_at: new Date().toISOString(),
-      }, { onConflict: 'lesson_id,student_id' });
-      if (error) throw error;
-    },
+    mutationFn: ({ studentId, status, score }: { studentId: string; status: AttendanceStatus; score?: number | null }) =>
+      api.lessons.markAttendance(lessonId, { student_id: studentId, status, score: score ?? null }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['lesson-roster', lessonId] }),
     onError: (e: any) => toast.error(e.message),
   });
@@ -68,7 +43,7 @@ export default function AttendancePage() {
         <label className="label">Выберите урок</label>
         <select className="input max-w-2xl" value={lessonId} onChange={e => setLessonId(e.target.value)}>
           <option value="">—</option>
-          {(lessonsQ.data || []).map(l => (
+          {(lessonsQ.data || []).map((l: Lesson) => (
             <option key={l.id} value={l.id}>{fmtDateTime(l.starts_at)} — {l.topic || 'Без темы'}</option>
           ))}
         </select>

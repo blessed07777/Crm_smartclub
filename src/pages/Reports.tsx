@@ -1,53 +1,20 @@
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { api } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import { BarChart, Bar, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend } from 'recharts';
 import { fmtMoney } from '@/lib/format';
 
 const COLORS = ['#4f46e5','#10b981','#f59e0b','#ef4444','#06b6d4','#8b5cf6','#22c55e','#0ea5e9','#f43f5e','#14b8a6'];
+const STATUS_LABEL: Record<string, string> = {
+  new: 'Новые', contacted: 'Контакт', trial: 'Пробный', negotiation: 'Переговоры', won: 'Купили', lost: 'Отказы',
+};
 
 export default function ReportsPage() {
-  const monthlyQ = useQuery({
-    queryKey: ['report-monthly'],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('payments').select('amount, kind, paid_at').gte('paid_at', new Date(Date.now()-365*864e5).toISOString().slice(0,10));
-      if (error) throw error;
-      const map = new Map<string, { month: string; income: number; expense: number }>();
-      for (const p of data || []) {
-        const m = p.paid_at.slice(0,7);
-        const row = map.get(m) || { month: m, income: 0, expense: 0 };
-        if (p.kind === 'income') row.income += Number(p.amount);
-        else row.expense += Number(p.amount);
-        map.set(m, row);
-      }
-      return Array.from(map.values()).sort((a,b) => a.month.localeCompare(b.month));
-    },
-  });
+  const monthlyQ = useQuery({ queryKey: ['report-monthly'], queryFn: () => api.reports.monthly() });
+  const leadsQ   = useQuery({ queryKey: ['report-leads'],   queryFn: () => api.reports.leadsFunnel() });
+  const groupRevQ = useQuery({ queryKey: ['report-group-revenue'], queryFn: () => api.reports.groupRevenue() });
 
-  const leadsQ = useQuery({
-    queryKey: ['report-leads'],
-    queryFn: async () => {
-      const { data } = await supabase.from('leads').select('status');
-      const counts: Record<string, number> = {};
-      (data || []).forEach(l => counts[l.status] = (counts[l.status] || 0) + 1);
-      return Object.entries(counts).map(([name, value]) => ({ name, value }));
-    },
-  });
-
-  const groupRevQ = useQuery({
-    queryKey: ['report-group-revenue'],
-    queryFn: async () => {
-      const { data: groups } = await supabase.from('groups').select('id, name, monthly_fee');
-      const { data: gs } = await supabase.from('group_students').select('group_id');
-      const counts: Record<string, number> = {};
-      (gs || []).forEach(r => counts[r.group_id] = (counts[r.group_id] || 0) + 1);
-      return (groups || []).map(g => ({
-        name: g.name,
-        revenue: counts[g.id] ? counts[g.id] * Number(g.monthly_fee) : 0,
-        students: counts[g.id] || 0,
-      })).sort((a,b) => b.revenue - a.revenue).slice(0, 10);
-    },
-  });
+  const leadsData = (leadsQ.data || []).map(d => ({ name: STATUS_LABEL[d.name] || d.name, value: d.value }));
 
   return (
     <div>
@@ -76,8 +43,8 @@ export default function ReportsPage() {
           <div className="h-72">
             <ResponsiveContainer>
               <PieChart>
-                <Pie data={leadsQ.data || []} dataKey="value" nameKey="name" outerRadius={100} label>
-                  {(leadsQ.data || []).map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                <Pie data={leadsData} dataKey="value" nameKey="name" outerRadius={100} label>
+                  {leadsData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                 </Pie>
                 <Legend />
                 <Tooltip />

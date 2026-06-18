@@ -3,8 +3,8 @@ import { useAuth } from '@/stores/auth';
 import { GraduationCap } from 'lucide-react';
 
 export default function AuthLayout() {
-  const { session, initialized } = useAuth();
-  if (initialized && session) return <Navigate to="/" replace />;
+  const { user, initialized } = useAuth();
+  if (initialized && user) return <Navigate to="/" replace />;
 
   return (
     <div className="min-h-screen grid md:grid-cols-2">

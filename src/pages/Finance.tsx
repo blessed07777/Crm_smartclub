@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { api } from '@/lib/api';
 import type { Payment, PaymentKind, Student, Group, Profile } from '@/types/database';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
@@ -8,13 +8,12 @@ import StatCard from '@/components/ui/StatCard';
 import { Plus, Wallet, TrendingUp, TrendingDown, Trash2, ArrowDownUp } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { fmtMoney, fmtDate } from '@/lib/format';
-import { useAuth } from '@/stores/auth';
 
 const KIND_LABEL: Record<PaymentKind, { label: string; tone: string }> = {
-  income:  { label: 'Доход',           tone: 'badge-green' },
-  expense: { label: 'Расход',          tone: 'badge-red' },
-  payout:  { label: 'Зарплата',        tone: 'badge-amber' },
-  refund:  { label: 'Возврат',         tone: 'badge-slate' },
+  income:  { label: 'Доход',    tone: 'badge-green' },
+  expense: { label: 'Расход',   tone: 'badge-red' },
+  payout:  { label: 'Зарплата', tone: 'badge-amber' },
+  refund:  { label: 'Возврат',  tone: 'badge-slate' },
 };
 
 const empty: Partial<Payment> = {
@@ -24,38 +23,21 @@ const empty: Partial<Payment> = {
 
 export default function FinancePage() {
   const qc = useQueryClient();
-  const { profile } = useAuth();
   const [editing, setEditing] = useState<Partial<Payment> | null>(null);
   const [filterKind, setFilterKind] = useState<PaymentKind | 'all'>('all');
 
-  const paymentsQ = useQuery({ queryKey: ['payments'], queryFn: async () => {
-    const { data, error } = await supabase.from('payments').select('*').order('paid_at', { ascending: false }).limit(500);
-    if (error) throw error; return data as Payment[];
-  }});
-  const studentsQ = useQuery({ queryKey: ['students-fin'], queryFn: async () => {
-    const { data } = await supabase.from('students').select('id, full_name');
-    return (data || []) as Pick<Student,'id'|'full_name'>[];
-  }});
-  const groupsQ = useQuery({ queryKey: ['groups-fin'], queryFn: async () => {
-    const { data } = await supabase.from('groups').select('id, name');
-    return (data || []) as Pick<Group,'id'|'name'>[];
-  }});
-  const teachersQ = useQuery({ queryKey: ['profiles-fin'], queryFn: async () => {
-    const { data } = await supabase.from('profiles').select('id, full_name, role').in('role', ['teacher','admin','manager']);
-    return (data || []) as Pick<Profile,'id'|'full_name'|'role'>[];
-  }});
+  const paymentsQ = useQuery({ queryKey: ['payments'], queryFn: () => api.payments.list({ orderBy: 'paid_at', order: 'desc', limit: 500 }) });
+  const studentsQ = useQuery({ queryKey: ['students-fin'], queryFn: () => api.students.list({ limit: 1000 }) });
+  const groupsQ   = useQuery({ queryKey: ['groups-fin'],   queryFn: () => api.groups.list({ limit: 1000 }) });
+  const usersQ    = useQuery({ queryKey: ['users-fin'],    queryFn: () => api.users.list() });
 
   const save = useMutation({
-    mutationFn: async (p: Partial<Payment>) => {
-      const payload: any = { ...p, created_by: profile?.id };
-      if (payload.id) { const { error } = await supabase.from('payments').update(payload).eq('id', payload.id); if (error) throw error; }
-      else { const { error } = await supabase.from('payments').insert(payload); if (error) throw error; }
-    },
+    mutationFn: (p: Partial<Payment>) => p.id ? api.payments.update(p.id, p) : api.payments.create(p),
     onSuccess: () => { toast.success('Сохранено'); setEditing(null); qc.invalidateQueries({ queryKey: ['payments'] }); },
     onError: (e: any) => toast.error(e.message),
   });
   const del = useMutation({
-    mutationFn: async (id: string) => { const { error } = await supabase.from('payments').delete().eq('id', id); if (error) throw error; },
+    mutationFn: (id: string) => api.payments.remove(id),
     onSuccess: () => { toast.success('Удалено'); qc.invalidateQueries({ queryKey: ['payments'] }); },
   });
 
@@ -109,9 +91,9 @@ export default function FinancePage() {
           </thead>
           <tbody>
             {list.map(p => {
-              const who = p.student_id ? studentsQ.data?.find(s => s.id === p.student_id)?.full_name
-                        : p.teacher_id ? teachersQ.data?.find(t => t.id === p.teacher_id)?.full_name
-                        : p.group_id   ? groupsQ.data?.find(g => g.id === p.group_id)?.name
+              const who = p.student_id ? studentsQ.data?.find((s: Student) => s.id === p.student_id)?.full_name
+                        : p.teacher_id ? usersQ.data?.find((t: Profile) => t.id === p.teacher_id)?.full_name
+                        : p.group_id   ? groupsQ.data?.find((g: Group) => g.id === p.group_id)?.name
                         : (p.category || '—');
               return (
                 <tr key={p.id} className="hover:bg-slate-50">
@@ -153,7 +135,7 @@ export default function FinancePage() {
                 <label className="label">Ученик</label>
                 <select className="input" value={editing.student_id||''} onChange={e=>setEditing({...editing, student_id: e.target.value || null})}>
                   <option value="">—</option>
-                  {(studentsQ.data || []).map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+                  {(studentsQ.data || []).map((s: Student) => <option key={s.id} value={s.id}>{s.full_name}</option>)}
                 </select>
               </div>
             ) : editing.kind === 'payout' ? (
@@ -161,7 +143,7 @@ export default function FinancePage() {
                 <label className="label">Преподаватель</label>
                 <select className="input" value={editing.teacher_id||''} onChange={e=>setEditing({...editing, teacher_id: e.target.value || null})}>
                   <option value="">—</option>
-                  {(teachersQ.data || []).filter(t=>t.role==='teacher').map(t => <option key={t.id} value={t.id}>{t.full_name}</option>)}
+                  {(usersQ.data || []).filter((t: Profile) => t.role === 'teacher').map((t: Profile) => <option key={t.id} value={t.id}>{t.full_name}</option>)}
                 </select>
               </div>
             ) : (

@@ -16,7 +16,7 @@ export default function RegisterPage() {
     e.preventDefault();
     try {
       await signUp(email.trim(), password, fullName.trim(), role);
-      toast.success('Аккаунт создан. Проверьте почту для подтверждения.');
+      toast.success('Аккаунт создан');
     } catch (err: any) {
       toast.error(err?.message || 'Ошибка регистрации');
     }
@@ -25,7 +25,9 @@ export default function RegisterPage() {
   return (
     <div>
       <h2 className="text-3xl font-bold text-slate-900">Регистрация</h2>
-      <p className="text-sm text-slate-500 mt-1">Создайте аккаунт сотрудника SmartClub</p>
+      <p className="text-sm text-slate-500 mt-1">
+        Первый зарегистрированный пользователь становится администратором.
+      </p>
 
       <form onSubmit={submit} className="mt-8 space-y-4">
         <div>
@@ -47,9 +49,6 @@ export default function RegisterPage() {
             <option value="teacher">Преподаватель</option>
             <option value="admin">Администратор</option>
           </select>
-          <p className="text-xs text-slate-500 mt-1">
-            Первый зарегистрированный пользователь должен выбрать «Администратор».
-          </p>
         </div>
         <button type="submit" disabled={loading} className="btn-primary w-full justify-center">
           <UserPlus size={16} /> {loading ? 'Создаём…' : 'Создать аккаунт'}

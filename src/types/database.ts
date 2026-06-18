@@ -6,10 +6,11 @@ export type AttendanceStatus = 'present' | 'absent' | 'late' | 'excused';
 
 export interface Profile {
   id: string;
+  email?: string;
   full_name: string;
   phone: string | null;
   role: UserRole;
-  avatar_url: string | null;
+  avatar_url?: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -105,43 +106,3 @@ export interface Payment {
   created_by: string | null;
   created_at: string;
 }
-
-export interface Note {
-  id: string;
-  subject_type: 'lead' | 'student' | 'group';
-  subject_id: string;
-  body: string;
-  author_id: string | null;
-  created_at: string;
-}
-
-// Supabase typed client placeholder
-export type Database = {
-  public: {
-    Tables: {
-      profiles:       { Row: Profile;     Insert: Partial<Profile>;     Update: Partial<Profile> };
-      subjects:       { Row: Subject;     Insert: Partial<Subject>;     Update: Partial<Subject> };
-      leads:          { Row: Lead;        Insert: Partial<Lead>;        Update: Partial<Lead> };
-      students:       { Row: Student;     Insert: Partial<Student>;     Update: Partial<Student> };
-      groups:         { Row: Group;       Insert: Partial<Group>;       Update: Partial<Group> };
-      lessons:        { Row: Lesson;      Insert: Partial<Lesson>;      Update: Partial<Lesson> };
-      attendance:     { Row: Attendance;  Insert: Partial<Attendance>;  Update: Partial<Attendance> };
-      payments:       { Row: Payment;     Insert: Partial<Payment>;     Update: Partial<Payment> };
-      notes:          { Row: Note;        Insert: Partial<Note>;        Update: Partial<Note> };
-      group_students: {
-        Row: { group_id: string; student_id: string; joined_at: string };
-        Insert: { group_id: string; student_id: string; joined_at?: string };
-        Update: { group_id?: string; student_id?: string; joined_at?: string };
-      };
-    };
-    Views: Record<string, never>;
-    Functions: Record<string, never>;
-    Enums: {
-      user_role: UserRole;
-      lead_status: LeadStatus;
-      student_status: StudentStatus;
-      payment_kind: PaymentKind;
-      attendance_status: AttendanceStatus;
-    };
-  };
-};

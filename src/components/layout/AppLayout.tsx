@@ -27,10 +27,10 @@ const roleLabel: Record<string, string> = {
 };
 
 export default function AppLayout() {
-  const { profile, signOut } = useAuth();
+  const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const role = profile?.role ?? 'manager';
+  const role = user?.role ?? 'manager';
   const items = nav.filter(n => n.roles.includes(role));
 
   return (
@@ -64,15 +64,15 @@ export default function AppLayout() {
         <div className="border-t border-slate-100 p-3">
           <div className="flex items-center gap-3 px-2 py-2">
             <div className="w-9 h-9 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-bold">
-              {(profile?.full_name || '?').slice(0,1).toUpperCase()}
+              {(user?.full_name || '?').slice(0,1).toUpperCase()}
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-semibold text-slate-900 truncate">{profile?.full_name || 'Без имени'}</div>
+              <div className="text-sm font-semibold text-slate-900 truncate">{user?.full_name || 'Без имени'}</div>
               <div className="text-xs text-slate-500 truncate">{roleLabel[role]}</div>
             </div>
           </div>
           <button
-            onClick={async () => { await signOut(); navigate('/login'); }}
+            onClick={() => { signOut(); navigate('/login'); }}
             className="btn-ghost w-full justify-start mt-1"
           >
             <LogOut size={16} /> Выйти

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { api } from '@/lib/api';
 import type { Lead, LeadStatus } from '@/types/database';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
@@ -9,13 +9,13 @@ import { Plus, Target, Phone, User, Trash2, Edit3 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { fmtMoney } from '@/lib/format';
 
-const STATUSES: { value: LeadStatus; label: string; tone: string }[] = [
-  { value: 'new',         label: 'Новый',       tone: 'badge-blue' },
-  { value: 'contacted',   label: 'Контакт',     tone: 'badge-violet' },
-  { value: 'trial',       label: 'Пробный',     tone: 'badge-amber' },
-  { value: 'negotiation', label: 'Переговоры',  tone: 'badge-amber' },
-  { value: 'won',         label: 'Купил',       tone: 'badge-green' },
-  { value: 'lost',        label: 'Отказ',       tone: 'badge-red' },
+const STATUSES: { value: LeadStatus; label: string }[] = [
+  { value: 'new',         label: 'Новый' },
+  { value: 'contacted',   label: 'Контакт' },
+  { value: 'trial',       label: 'Пробный' },
+  { value: 'negotiation', label: 'Переговоры' },
+  { value: 'won',         label: 'Купил' },
+  { value: 'lost',        label: 'Отказ' },
 ];
 
 const empty: Partial<Lead> = {
@@ -29,36 +29,18 @@ export default function LeadsPage() {
 
   const { data: leads = [], isLoading } = useQuery({
     queryKey: ['leads'],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('leads').select('*').order('created_at', { ascending: false });
-      if (error) throw error;
-      return data as Lead[];
-    },
+    queryFn: () => api.leads.list({ orderBy: 'created_at', order: 'desc' }),
   });
 
   const save = useMutation({
-    mutationFn: async (l: Partial<Lead>) => {
-      const payload = { ...l };
-      if (payload.id) {
-        const { error } = await supabase.from('leads').update(payload).eq('id', payload.id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from('leads').insert(payload);
-        if (error) throw error;
-      }
-    },
-    onSuccess: () => {
-      toast.success('Сохранено'); setEditing(null);
-      qc.invalidateQueries({ queryKey: ['leads'] });
-    },
+    mutationFn: async (l: Partial<Lead>) =>
+      l.id ? api.leads.update(l.id, l) : api.leads.create(l),
+    onSuccess: () => { toast.success('Сохранено'); setEditing(null); qc.invalidateQueries({ queryKey: ['leads'] }); },
     onError: (e: any) => toast.error(e.message),
   });
 
   const del = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from('leads').delete().eq('id', id);
-      if (error) throw error;
-    },
+    mutationFn: (id: string) => api.leads.remove(id),
     onSuccess: () => { toast.success('Удалено'); qc.invalidateQueries({ queryKey: ['leads'] }); },
     onError: (e: any) => toast.error(e.message),
   });
@@ -127,55 +109,33 @@ export default function LeadsPage() {
         </div>
       )}
 
-      <LeadForm
-        value={editing}
-        onClose={() => setEditing(null)}
-        onSave={l => save.mutate(l)}
-        saving={save.isPending}
-      />
+      {editing && (
+        <Modal
+          open onClose={() => setEditing(null)}
+          title={editing.id ? 'Редактировать лид' : 'Новый лид'}
+          footer={<>
+            <button className="btn-secondary" onClick={() => setEditing(null)}>Отмена</button>
+            <button className="btn-primary" disabled={save.isPending} onClick={() => save.mutate(editing)}>{save.isPending ? 'Сохраняем…' : 'Сохранить'}</button>
+          </>}
+        >
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2"><label className="label">ФИО ученика *</label><input className="input" value={editing.full_name||''} onChange={e=>setEditing({...editing, full_name: e.target.value})} required /></div>
+            <div><label className="label">Телефон *</label><input className="input" value={editing.phone||''} onChange={e=>setEditing({...editing, phone: e.target.value})} required /></div>
+            <div><label className="label">Класс</label><input type="number" min={1} max={12} className="input" value={editing.grade ?? ''} onChange={e=>setEditing({...editing, grade: e.target.value ? Number(e.target.value) : null})} /></div>
+            <div><label className="label">Родитель</label><input className="input" value={editing.parent_name||''} onChange={e=>setEditing({...editing, parent_name: e.target.value})} /></div>
+            <div><label className="label">Телефон родителя</label><input className="input" value={editing.parent_phone||''} onChange={e=>setEditing({...editing, parent_phone: e.target.value})} /></div>
+            <div><label className="label">Источник</label><input className="input" value={editing.source||''} onChange={e=>setEditing({...editing, source: e.target.value})} placeholder="Instagram, рекомендация…" /></div>
+            <div>
+              <label className="label">Статус</label>
+              <select className="input" value={editing.status||'new'} onChange={e=>setEditing({...editing, status: e.target.value as LeadStatus})}>
+                {STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </select>
+            </div>
+            <div className="col-span-2"><label className="label">Ожидаемая выручка, ₸</label><input type="number" className="input" value={editing.expected_revenue ?? 0} onChange={e=>setEditing({...editing, expected_revenue: Number(e.target.value)})} /></div>
+            <div className="col-span-2"><label className="label">Заметка</label><textarea className="input" rows={3} value={editing.note||''} onChange={e=>setEditing({...editing, note: e.target.value})} /></div>
+          </div>
+        </Modal>
+      )}
     </div>
-  );
-}
-
-function LeadForm({ value, onClose, onSave, saving }: {
-  value: Partial<Lead> | null;
-  onClose: () => void;
-  onSave: (l: Partial<Lead>) => void;
-  saving: boolean;
-}) {
-  const [form, setForm] = useState<Partial<Lead>>(value || {});
-  // sync when opening different lead
-  if (value && form !== value && (value.id !== form.id)) setForm(value);
-  if (!value) return null;
-  const set = <K extends keyof Lead>(k: K, v: Lead[K] | undefined) => setForm(f => ({ ...f, [k]: v }));
-
-  return (
-    <Modal
-      open onClose={onClose}
-      title={value.id ? 'Редактировать лид' : 'Новый лид'}
-      footer={
-        <>
-          <button className="btn-secondary" onClick={onClose}>Отмена</button>
-          <button className="btn-primary" disabled={saving} onClick={() => onSave(form)}>{saving ? 'Сохраняем…' : 'Сохранить'}</button>
-        </>
-      }
-    >
-      <div className="grid grid-cols-2 gap-3">
-        <div className="col-span-2"><label className="label">ФИО ученика *</label><input className="input" value={form.full_name||''} onChange={e=>set('full_name', e.target.value)} required /></div>
-        <div><label className="label">Телефон *</label><input className="input" value={form.phone||''} onChange={e=>set('phone', e.target.value)} required /></div>
-        <div><label className="label">Класс</label><input type="number" min={1} max={12} className="input" value={form.grade ?? ''} onChange={e=>set('grade', e.target.value ? Number(e.target.value) : null)} /></div>
-        <div><label className="label">Родитель</label><input className="input" value={form.parent_name||''} onChange={e=>set('parent_name', e.target.value)} /></div>
-        <div><label className="label">Телефон родителя</label><input className="input" value={form.parent_phone||''} onChange={e=>set('parent_phone', e.target.value)} /></div>
-        <div><label className="label">Источник</label><input className="input" value={form.source||''} onChange={e=>set('source', e.target.value)} placeholder="Instagram, рекомендация…" /></div>
-        <div>
-          <label className="label">Статус</label>
-          <select className="input" value={form.status||'new'} onChange={e=>set('status', e.target.value as LeadStatus)}>
-            {STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-          </select>
-        </div>
-        <div className="col-span-2"><label className="label">Ожидаемая выручка, ₸</label><input type="number" className="input" value={form.expected_revenue ?? 0} onChange={e=>set('expected_revenue', Number(e.target.value))} /></div>
-        <div className="col-span-2"><label className="label">Заметка</label><textarea className="input" rows={3} value={form.note||''} onChange={e=>set('note', e.target.value)} /></div>
-      </div>
-    </Modal>
   );
 }

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { api } from '@/lib/api';
 import type { Student, StudentStatus } from '@/types/database';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
@@ -28,33 +28,17 @@ export default function StudentsPage() {
 
   const { data: students = [], isLoading } = useQuery({
     queryKey: ['students'],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('students').select('*').order('full_name');
-      if (error) throw error;
-      return data as Student[];
-    },
+    queryFn: () => api.students.list({ orderBy: 'full_name', order: 'asc' }),
   });
 
   const save = useMutation({
-    mutationFn: async (s: Partial<Student>) => {
-      const payload = { ...s };
-      if (payload.id) {
-        const { error } = await supabase.from('students').update(payload).eq('id', payload.id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from('students').insert(payload);
-        if (error) throw error;
-      }
-    },
+    mutationFn: (s: Partial<Student>) => s.id ? api.students.update(s.id, s) : api.students.create(s),
     onSuccess: () => { toast.success('Сохранено'); setEditing(null); qc.invalidateQueries({ queryKey: ['students'] }); },
     onError: (e: any) => toast.error(e.message),
   });
 
   const del = useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await supabase.from('students').delete().eq('id', id);
-      if (error) throw error;
-    },
+    mutationFn: (id: string) => api.students.remove(id),
     onSuccess: () => { toast.success('Удалено'); qc.invalidateQueries({ queryKey: ['students'] }); },
     onError: (e: any) => toast.error(e.message),
   });
@@ -130,12 +114,10 @@ export default function StudentsPage() {
           onClose={() => setEditing(null)}
           title={editing.id ? 'Редактировать ученика' : 'Новый ученик'}
           size="lg"
-          footer={
-            <>
-              <button className="btn-secondary" onClick={() => setEditing(null)}>Отмена</button>
-              <button className="btn-primary" disabled={save.isPending} onClick={() => save.mutate(editing)}>{save.isPending ? 'Сохраняем…' : 'Сохранить'}</button>
-            </>
-          }
+          footer={<>
+            <button className="btn-secondary" onClick={() => setEditing(null)}>Отмена</button>
+            <button className="btn-primary" disabled={save.isPending} onClick={() => save.mutate(editing)}>{save.isPending ? 'Сохраняем…' : 'Сохранить'}</button>
+          </>}
         >
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2"><label className="label">ФИО *</label><input className="input" value={editing.full_name||''} onChange={e=>setEditing({...editing, full_name: e.target.value})} required /></div>

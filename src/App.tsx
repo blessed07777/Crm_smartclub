@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from '@/stores/auth';
-import { supabaseConfigured } from '@/lib/supabase';
 
 import AuthLayout from '@/components/layout/AuthLayout';
 import AppLayout from '@/components/layout/AppLayout';
@@ -17,21 +16,18 @@ import FinancePage from '@/pages/Finance';
 import TeachersPage from '@/pages/Teachers';
 import ReportsPage from '@/pages/Reports';
 import SettingsPage from '@/pages/Settings';
-import SetupPage from '@/pages/Setup';
 
 function RequireAuth({ children, roles }: { children: JSX.Element; roles?: string[] }) {
-  const { session, profile, initialized } = useAuth();
+  const { user, initialized } = useAuth();
   if (!initialized) return <div className="p-10 text-slate-500">Загрузка…</div>;
-  if (!session) return <Navigate to="/login" replace />;
-  if (roles && profile && !roles.includes(profile.role)) return <Navigate to="/" replace />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />;
   return children;
 }
 
 export default function App() {
   const init = useAuth(s => s.init);
   useEffect(() => { init(); }, [init]);
-
-  if (!supabaseConfigured) return <SetupPage />;
 
   return (
     <Routes>

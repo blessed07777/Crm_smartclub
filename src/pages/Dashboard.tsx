@@ -1,41 +1,17 @@
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { api } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import StatCard from '@/components/ui/StatCard';
 import { Users, GraduationCap, Wallet, Target, TrendingUp, CalendarDays } from 'lucide-react';
 import { fmtMoney, fmtDateTime } from '@/lib/format';
 import { useAuth } from '@/stores/auth';
-import { LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar } from 'recharts';
+import { ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar } from 'recharts';
 
 export default function DashboardPage() {
-  const { profile } = useAuth();
-
-  const { data: stats } = useQuery({
+  const { user } = useAuth();
+  const { data } = useQuery({
     queryKey: ['dashboard-stats'],
-    queryFn: async () => {
-      const [students, leads, groups, payments, lessons] = await Promise.all([
-        supabase.from('students').select('id, status', { count: 'exact', head: false }),
-        supabase.from('leads').select('id, status', { count: 'exact', head: false }),
-        supabase.from('groups').select('id, is_active', { count: 'exact', head: false }),
-        supabase.from('payments').select('amount, kind, paid_at').gte('paid_at', new Date(Date.now()-30*864e5).toISOString().slice(0,10)),
-        supabase.from('lessons').select('id, starts_at, group_id, topic').gte('starts_at', new Date().toISOString()).order('starts_at').limit(5),
-      ]);
-      const activeStudents = (students.data || []).filter(s => s.status === 'active').length;
-      const openLeads = (leads.data || []).filter(l => !['won','lost'].includes(l.status)).length;
-      const activeGroups = (groups.data || []).filter(g => g.is_active).length;
-      const income30 = (payments.data || []).filter(p => p.kind === 'income').reduce((s,p) => s + Number(p.amount), 0);
-      const expenses30 = (payments.data || []).filter(p => ['expense','payout','refund'].includes(p.kind)).reduce((s,p) => s + Number(p.amount), 0);
-      return {
-        activeStudents,
-        openLeads,
-        activeGroups,
-        income30,
-        expenses30,
-        netProfit: income30 - expenses30,
-        upcoming: lessons.data || [],
-        payments: payments.data || [],
-      };
-    },
+    queryFn: () => api.dashboard.stats(),
   });
 
   const chartData = (() => {
@@ -44,12 +20,12 @@ export default function DashboardPage() {
       const d = new Date(Date.now() - i * 864e5).toISOString().slice(0, 10);
       map.set(d, { day: d.slice(5), income: 0, expense: 0 });
     }
-    (stats?.payments || []).forEach((p: any) => {
-      const d = p.paid_at.slice(0, 10);
+    (data?.daily || []).forEach(r => {
+      const d = String(r.day).slice(0, 10);
       const e = map.get(d);
       if (!e) return;
-      if (p.kind === 'income') e.income += Number(p.amount);
-      else e.expense += Number(p.amount);
+      if (r.kind === 'income') e.income += Number(r.total);
+      else e.expense += Number(r.total);
     });
     return Array.from(map.values());
   })();
@@ -57,15 +33,15 @@ export default function DashboardPage() {
   return (
     <div>
       <PageHeader
-        title={`Привет, ${profile?.full_name?.split(' ')[0] || 'друг'} 👋`}
+        title={`Привет, ${user?.full_name?.split(' ')[0] || 'друг'} 👋`}
         subtitle="Обзор работы школы за последние 30 дней"
       />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <StatCard label="Активные ученики" value={stats?.activeStudents ?? '—'} icon={<Users size={20} />} tone="brand" />
-        <StatCard label="Открытые лиды" value={stats?.openLeads ?? '—'} icon={<Target size={20} />} tone="amber" />
-        <StatCard label="Активные группы" value={stats?.activeGroups ?? '—'} icon={<GraduationCap size={20} />} tone="emerald" />
-        <StatCard label="Чистая прибыль (30 дн.)" value={fmtMoney(stats?.netProfit ?? 0)} icon={<Wallet size={20} />} tone="rose" />
+        <StatCard label="Активные ученики" value={data?.students.active_students ?? '—'} icon={<Users size={20} />} tone="brand" />
+        <StatCard label="Открытые лиды"     value={data?.leads.open_leads ?? '—'}        icon={<Target size={20} />} tone="amber" />
+        <StatCard label="Активные группы"   value={data?.groups.active_groups ?? '—'}    icon={<GraduationCap size={20} />} tone="emerald" />
+        <StatCard label="Прибыль (30 дн.)"  value={fmtMoney(data?.finance30.net ?? 0)}   icon={<Wallet size={20} />} tone="rose" />
       </div>
 
       <div className="grid lg:grid-cols-3 gap-6">
@@ -94,10 +70,10 @@ export default function DashboardPage() {
             <CalendarDays size={18} className="text-brand-600" />
           </div>
           <ul className="space-y-3">
-            {(stats?.upcoming || []).length === 0 && (
+            {(data?.upcoming || []).length === 0 && (
               <li className="text-sm text-slate-500">Занятий не запланировано</li>
             )}
-            {(stats?.upcoming || []).map((l: any) => (
+            {(data?.upcoming || []).map(l => (
               <li key={l.id} className="flex items-start gap-3 text-sm">
                 <div className="w-2 h-2 mt-2 rounded-full bg-brand-500" />
                 <div>

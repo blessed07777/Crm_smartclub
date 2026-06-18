@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { api } from '@/lib/api';
 import type { Profile, UserRole } from '@/types/database';
 import PageHeader from '@/components/ui/PageHeader';
 import EmptyState from '@/components/ui/EmptyState';
@@ -16,17 +16,11 @@ const ROLE: Record<UserRole, { label: string; tone: string }> = {
 export default function TeachersPage() {
   const qc = useQueryClient();
 
-  const profilesQ = useQuery({ queryKey: ['profiles'], queryFn: async () => {
-    const { data, error } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
-    if (error) throw error; return data as Profile[];
-  }});
+  const usersQ = useQuery({ queryKey: ['users'], queryFn: () => api.users.list() });
 
   const update = useMutation({
-    mutationFn: async (p: Partial<Profile> & { id: string }) => {
-      const { error } = await supabase.from('profiles').update(p).eq('id', p.id);
-      if (error) throw error;
-    },
-    onSuccess: () => { toast.success('Обновлено'); qc.invalidateQueries({ queryKey: ['profiles'] }); },
+    mutationFn: (p: Partial<Profile> & { id: string }) => api.users.update(p.id, p),
+    onSuccess: () => { toast.success('Обновлено'); qc.invalidateQueries({ queryKey: ['users'] }); },
     onError: (e: any) => toast.error(e.message),
   });
 
@@ -34,8 +28,8 @@ export default function TeachersPage() {
     <div>
       <PageHeader title="Сотрудники" subtitle="Преподаватели, менеджеры и администраторы школы" />
 
-      {profilesQ.isLoading ? <div className="text-slate-500">Загрузка…</div>
-       : (profilesQ.data || []).length === 0 ? (
+      {usersQ.isLoading ? <div className="text-slate-500">Загрузка…</div>
+       : (usersQ.data || []).length === 0 ? (
         <EmptyState icon={<UserCog size={24} />} title="Сотрудников пока нет" hint="Сотрудники появляются здесь после регистрации." />
        ) : (
         <div className="card overflow-x-auto">
@@ -43,6 +37,7 @@ export default function TeachersPage() {
             <thead className="bg-slate-50">
               <tr>
                 <th className="table-th">ФИО</th>
+                <th className="table-th">Email</th>
                 <th className="table-th">Роль</th>
                 <th className="table-th">Телефон</th>
                 <th className="table-th">Создан</th>
@@ -51,9 +46,10 @@ export default function TeachersPage() {
               </tr>
             </thead>
             <tbody>
-              {(profilesQ.data || []).map(p => (
+              {(usersQ.data || []).map((p: Profile) => (
                 <tr key={p.id} className="hover:bg-slate-50">
                   <td className="table-td font-medium">{p.full_name || '—'}</td>
+                  <td className="table-td">{(p as any).email || '—'}</td>
                   <td className="table-td">
                     <select
                       className="input w-44 py-1"

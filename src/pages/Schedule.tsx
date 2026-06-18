@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { api } from '@/lib/api';
 import type { Lesson, Group } from '@/types/database';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
@@ -23,32 +23,27 @@ export default function SchedulePage() {
   const qc = useQueryClient();
   const [editing, setEditing] = useState<Partial<Lesson> | null>(null);
 
-  const lessonsQ = useQuery({ queryKey: ['lessons'], queryFn: async () => {
-    const { data, error } = await supabase.from('lessons').select('*').order('starts_at', { ascending: false }).limit(200);
-    if (error) throw error; return data as Lesson[];
-  }});
-  const groupsQ = useQuery({ queryKey: ['groups-all'], queryFn: async () => {
-    const { data, error } = await supabase.from('groups').select('*').order('name');
-    if (error) throw error; return data as Group[];
-  }});
+  const lessonsQ = useQuery({ queryKey: ['lessons'], queryFn: () => api.lessons.list({ orderBy: 'starts_at', order: 'desc', limit: 200 }) });
+  const groupsQ  = useQuery({ queryKey: ['groups-all'], queryFn: () => api.groups.list({ orderBy: 'name', order: 'asc' }) });
 
   const save = useMutation({
-    mutationFn: async (l: Partial<Lesson>) => {
-      const payload: any = { ...l };
-      payload.starts_at = new Date(payload.starts_at).toISOString();
-      payload.ends_at = new Date(payload.ends_at).toISOString();
-      if (payload.id) { const { error } = await supabase.from('lessons').update(payload).eq('id', payload.id); if (error) throw error; }
-      else { const { error } = await supabase.from('lessons').insert(payload); if (error) throw error; }
+    mutationFn: (l: Partial<Lesson>) => {
+      const payload: Partial<Lesson> = {
+        ...l,
+        starts_at: l.starts_at ? new Date(l.starts_at).toISOString() : undefined,
+        ends_at: l.ends_at ? new Date(l.ends_at).toISOString() : undefined,
+      };
+      return l.id ? api.lessons.update(l.id, payload) : api.lessons.create(payload);
     },
     onSuccess: () => { toast.success('Сохранено'); setEditing(null); qc.invalidateQueries({ queryKey: ['lessons'] }); },
     onError: (e: any) => toast.error(e.message),
   });
   const del = useMutation({
-    mutationFn: async (id: string) => { const { error } = await supabase.from('lessons').delete().eq('id', id); if (error) throw error; },
+    mutationFn: (id: string) => api.lessons.remove(id),
     onSuccess: () => { toast.success('Удалено'); qc.invalidateQueries({ queryKey: ['lessons'] }); },
   });
 
-  const groupName = (id: string) => groupsQ.data?.find(g => g.id === id)?.name || '—';
+  const groupName = (id: string) => groupsQ.data?.find((g: Group) => g.id === id)?.name || '—';
 
   const grouped = (lessonsQ.data || []).reduce<Record<string, Lesson[]>>((acc, l) => {
     const d = l.starts_at.slice(0, 10);
@@ -114,7 +109,7 @@ export default function SchedulePage() {
               <label className="label">Группа *</label>
               <select className="input" value={editing.group_id||''} onChange={e=>setEditing({...editing, group_id: e.target.value})} required>
                 <option value="">—</option>
-                {(groupsQ.data || []).map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                {(groupsQ.data || []).map((g: Group) => <option key={g.id} value={g.id}>{g.name}</option>)}
               </select>
             </div>
             <div><label className="label">Начало *</label><input type="datetime-local" className="input" value={editing.starts_at||''} onChange={e=>setEditing({...editing, starts_at: e.target.value})} required /></div>

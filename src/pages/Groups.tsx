@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { api } from '@/lib/api';
 import type { Group, Subject, Profile, Student } from '@/types/database';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
@@ -19,31 +19,19 @@ export default function GroupsPage() {
   const [editing, setEditing] = useState<Partial<Group> | null>(null);
   const [rosterFor, setRosterFor] = useState<Group | null>(null);
 
-  const groupsQ = useQuery({ queryKey: ['groups'], queryFn: async () => {
-    const { data, error } = await supabase.from('groups').select('*').order('created_at', { ascending: false });
-    if (error) throw error; return data as Group[];
-  }});
-  const subjectsQ = useQuery({ queryKey: ['subjects'], queryFn: async () => {
-    const { data, error } = await supabase.from('subjects').select('*').order('name');
-    if (error) throw error; return data as Subject[];
-  }});
-  const teachersQ = useQuery({ queryKey: ['profiles-teachers'], queryFn: async () => {
-    const { data, error } = await supabase.from('profiles').select('*').in('role', ['teacher']);
-    if (error) throw error; return data as Profile[];
-  }});
+  const groupsQ   = useQuery({ queryKey: ['groups'],   queryFn: () => api.groups.list({ orderBy: 'created_at', order: 'desc' }) });
+  const subjectsQ = useQuery({ queryKey: ['subjects'], queryFn: () => api.subjects.list({ orderBy: 'name', order: 'asc' }) });
+  const usersQ    = useQuery({ queryKey: ['users-all'],queryFn: () => api.users.list() });
+
+  const teachers = (usersQ.data || []).filter(u => u.role === 'teacher');
 
   const save = useMutation({
-    mutationFn: async (g: Partial<Group>) => {
-      const payload: any = { ...g };
-      if (payload.id) { const { error } = await supabase.from('groups').update(payload).eq('id', payload.id); if (error) throw error; }
-      else { const { error } = await supabase.from('groups').insert(payload); if (error) throw error; }
-    },
+    mutationFn: (g: Partial<Group>) => g.id ? api.groups.update(g.id, g) : api.groups.create(g),
     onSuccess: () => { toast.success('Сохранено'); setEditing(null); qc.invalidateQueries({ queryKey: ['groups'] }); },
     onError: (e: any) => toast.error(e.message),
   });
-
   const del = useMutation({
-    mutationFn: async (id: string) => { const { error } = await supabase.from('groups').delete().eq('id', id); if (error) throw error; },
+    mutationFn: (id: string) => api.groups.remove(id),
     onSuccess: () => { toast.success('Удалено'); qc.invalidateQueries({ queryKey: ['groups'] }); },
     onError: (e: any) => toast.error(e.message),
   });
@@ -69,7 +57,7 @@ export default function GroupsPage() {
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
           {(groupsQ.data || []).map(g => {
             const subj = subjectsQ.data?.find(s => s.id === g.subject_id);
-            const teacher = teachersQ.data?.find(t => t.id === g.teacher_id);
+            const teacher = teachers.find(t => t.id === g.teacher_id);
             return (
               <div key={g.id} className="card p-5">
                 <div className="flex items-start justify-between mb-3">
@@ -102,12 +90,10 @@ export default function GroupsPage() {
         <Modal
           open onClose={() => setEditing(null)}
           title={editing.id ? 'Редактировать группу' : 'Новая группа'}
-          footer={
-            <>
-              <button className="btn-secondary" onClick={() => setEditing(null)}>Отмена</button>
-              <button className="btn-primary" disabled={save.isPending} onClick={() => save.mutate(editing)}>Сохранить</button>
-            </>
-          }
+          footer={<>
+            <button className="btn-secondary" onClick={() => setEditing(null)}>Отмена</button>
+            <button className="btn-primary" disabled={save.isPending} onClick={() => save.mutate(editing)}>Сохранить</button>
+          </>}
         >
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2"><label className="label">Название *</label><input className="input" value={editing.name||''} onChange={e=>setEditing({...editing, name: e.target.value})} required /></div>
@@ -122,7 +108,7 @@ export default function GroupsPage() {
               <label className="label">Преподаватель</label>
               <select className="input" value={editing.teacher_id||''} onChange={e=>setEditing({...editing, teacher_id: e.target.value || null})}>
                 <option value="">—</option>
-                {(teachersQ.data || []).map(t => <option key={t.id} value={t.id}>{t.full_name}</option>)}
+                {teachers.map(t => <option key={t.id} value={t.id}>{t.full_name}</option>)}
               </select>
             </div>
             <div><label className="label">Стоимость, ₸/мес</label><input type="number" className="input" value={editing.monthly_fee ?? 0} onChange={e=>setEditing({...editing, monthly_fee: Number(e.target.value)})} /></div>
@@ -144,37 +130,24 @@ function RosterModal({ group, onClose }: { group: Group; onClose: () => void }) 
   const qc = useQueryClient();
   const rosterQ = useQuery({
     queryKey: ['roster', group.id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('group_students')
-        .select('student_id, students!inner(*)')
-        .eq('group_id', group.id);
-      if (error) throw error;
-      return (data || []).map((r: any) => r.students) as Student[];
-    },
+    queryFn: () => api.groups.roster(group.id),
   });
-  const studentsQ = useQuery({ queryKey: ['students-all'], queryFn: async () => {
-    const { data, error } = await supabase.from('students').select('*').order('full_name');
-    if (error) throw error; return data as Student[];
-  }});
+  const studentsQ = useQuery({
+    queryKey: ['students-all'],
+    queryFn: () => api.students.list({ orderBy: 'full_name', order: 'asc' }),
+  });
 
   const add = useMutation({
-    mutationFn: async (sid: string) => {
-      const { error } = await supabase.from('group_students').insert({ group_id: group.id, student_id: sid });
-      if (error) throw error;
-    },
+    mutationFn: (sid: string) => api.groups.addStudent(group.id, sid),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['roster', group.id] }),
     onError: (e: any) => toast.error(e.message),
   });
   const remove = useMutation({
-    mutationFn: async (sid: string) => {
-      const { error } = await supabase.from('group_students').delete().match({ group_id: group.id, student_id: sid });
-      if (error) throw error;
-    },
+    mutationFn: (sid: string) => api.groups.removeStudent(group.id, sid),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['roster', group.id] }),
   });
 
-  const inGroup = new Set((rosterQ.data || []).map(s => s.id));
+  const inGroup = new Set((rosterQ.data || []).map((s: Student) => s.id));
   const candidates = (studentsQ.data || []).filter(s => !inGroup.has(s.id));
 
   return (
@@ -183,7 +156,7 @@ function RosterModal({ group, onClose }: { group: Group; onClose: () => void }) 
         <div>
           <div className="text-xs font-semibold text-slate-600 uppercase mb-2">В группе ({(rosterQ.data || []).length})</div>
           <div className="space-y-2 max-h-80 overflow-y-auto">
-            {(rosterQ.data || []).map(s => (
+            {(rosterQ.data || []).map((s: Student) => (
               <div key={s.id} className="flex items-center justify-between bg-slate-50 rounded-lg p-2 text-sm">
                 <span>{s.full_name}</span>
                 <button onClick={() => remove.mutate(s.id)} className="text-rose-600 hover:bg-rose-50 p-1 rounded"><Trash2 size={14} /></button>
