@@ -3,19 +3,20 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/stores/auth';
 import {
   LayoutDashboard, Users, GraduationCap, CalendarDays, ClipboardCheck,
-  Wallet, UserCog, BarChart3, Settings, LogOut, Menu, X, Target,
+  Wallet, UserCog, BarChart3, Settings, LogOut, Menu, X, Target, Briefcase,
 } from 'lucide-react';
 import clsx from 'clsx';
 
 const nav = [
   { to: '/', label: 'Дашборд', icon: LayoutDashboard, roles: ['admin','manager','teacher'] },
+  { to: '/workspace', label: 'Мой кабинет', icon: Briefcase, roles: ['admin','manager'] },
   { to: '/leads', label: 'Лиды', icon: Target, roles: ['admin','manager'] },
   { to: '/students', label: 'Ученики', icon: Users, roles: ['admin','manager','teacher'] },
   { to: '/groups', label: 'Группы', icon: GraduationCap, roles: ['admin','manager','teacher'] },
   { to: '/schedule', label: 'Расписание', icon: CalendarDays, roles: ['admin','manager','teacher'] },
   { to: '/attendance', label: 'Посещаемость', icon: ClipboardCheck, roles: ['admin','manager','teacher'] },
   { to: '/finance', label: 'Финансы', icon: Wallet, roles: ['admin','manager'] },
-  { to: '/teachers', label: 'Преподаватели', icon: UserCog, roles: ['admin','manager'] },
+  { to: '/teachers', label: 'Сотрудники', icon: UserCog, roles: ['admin','manager'] },
   { to: '/reports', label: 'Отчёты', icon: BarChart3, roles: ['admin','manager'] },
   { to: '/settings', label: 'Настройки', icon: Settings, roles: ['admin','manager','teacher'] },
 ];

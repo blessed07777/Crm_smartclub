@@ -28,6 +28,18 @@ app.get('/api/health', async (_req, res) => {
 // ============================================================
 // AUTH
 // ============================================================
+import { decodeToken } from './auth.js';
+
+async function countUsers() {
+  const r = await q1<{ c: number | string }>('select count(*)::int as c from users');
+  return Number(r?.c ?? 0);
+}
+
+// Bootstrap probe — frontend uses it to decide whether to show public registration
+app.get('/api/auth/can-register-public', async (_req, res) => {
+  res.json({ allowed: (await countUsers()) === 0 });
+});
+
 app.post('/api/auth/register', async (req, res) => {
   const { email, password, full_name, role } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: 'email и пароль обязательны' });
@@ -35,9 +47,21 @@ app.post('/api/auth/register', async (req, res) => {
   const validRoles = ['admin', 'manager', 'teacher'];
   const r = validRoles.includes(role) ? role : 'manager';
 
-  // First user becomes admin regardless of requested role
-  const usersCount = await q1<{ c: number | string }>('select count(*)::int as c from users');
-  const finalRole = Number(usersCount?.c ?? 0) === 0 ? 'admin' : r;
+  const hasUsers = (await countUsers()) > 0;
+
+  // After bootstrap: only admin can register new users
+  if (hasUsers) {
+    const h = req.headers.authorization || '';
+    const token = h.startsWith('Bearer ') ? h.slice(7) : '';
+    try {
+      const payload = decodeToken(token);
+      if (payload.role !== 'admin') return res.status(403).json({ error: 'Регистрация доступна только администратору' });
+    } catch {
+      return res.status(403).json({ error: 'Регистрация закрыта. Обратитесь к администратору.' });
+    }
+  }
+
+  const finalRole = hasUsers ? r : 'admin'; // first user is always admin
 
   const exists = await q1('select id from users where email = $1', [email.toLowerCase()]);
   if (exists) return res.status(409).json({ error: 'Пользователь с таким email уже существует' });
@@ -50,6 +74,10 @@ app.post('/api/auth/register', async (req, res) => {
     [email.toLowerCase(), hash, full_name || email, finalRole],
   );
   if (!user) return res.status(500).json({ error: 'не удалось создать пользователя' });
+
+  // If created by admin via authenticated request — don't return a token (admin keeps own session)
+  if (hasUsers) return res.json({ user });
+
   const token = signToken({ uid: user.id, role: user.role });
   res.json({ token, user });
 });
@@ -189,6 +217,13 @@ app.use('/api/subjects', resource({
   defaultOrder: 'name',
 }));
 
+// Auto-assign new lead to the creating manager when not specified
+app.post('/api/leads', requireAuth, (req, _res, next) => {
+  if (req.user?.role === 'manager' && req.body && !req.body.assigned_to) {
+    req.body.assigned_to = req.user.uid;
+  }
+  next();
+});
 app.use('/api/leads', resource({
   table: 'leads',
   fields: ['full_name','phone','parent_name','parent_phone','grade','target_subjects','source','status','note','assigned_to','expected_revenue'],
@@ -232,6 +267,10 @@ app.get('/api/users', requireAuth, async (_req, res) => {
 app.patch('/api/users/:id', requireAuth, requireRole('admin', 'manager'), async (req, res) => {
   const { full_name, phone, role, is_active } = req.body || {};
   if (role && !['admin','manager','teacher'].includes(role)) return res.status(400).json({ error: 'invalid role' });
+  // Role and account-disable are admin-only
+  const isAdmin = req.user?.role === 'admin';
+  const safeRole = isAdmin ? (role ?? null) : null;
+  const safeActive = isAdmin ? (is_active ?? null) : null;
   const row = await q1(
     `update users set
         full_name = coalesce($1, full_name),
@@ -240,9 +279,94 @@ app.patch('/api/users/:id', requireAuth, requireRole('admin', 'manager'), async 
         is_active = coalesce($4, is_active),
         updated_at = now()
      where id = $5 returning ${userFields}`,
-    [full_name ?? null, phone ?? null, role ?? null, is_active ?? null, req.params.id],
+    [full_name ?? null, phone ?? null, safeRole, safeActive, req.params.id],
   );
   res.json(row);
+});
+
+app.delete('/api/users/:id', requireAuth, requireRole('admin'), async (req, res) => {
+  if (req.params.id === req.user?.uid) return res.status(400).json({ error: 'нельзя удалить самого себя' });
+  await pool.query('delete from users where id = $1', [req.params.id]);
+  res.status(204).end();
+});
+
+// ============================================================
+// STUDENT PROFILE (full card)
+// ============================================================
+app.get('/api/students/:id/profile', requireAuth, async (req, res) => {
+  const id = req.params.id;
+  const student = await q1<any>('select * from students where id = $1', [id]);
+  if (!student) return res.status(404).json({ error: 'not found' });
+
+  const [groups, attendance, payments] = await Promise.all([
+    q<any>(
+      `select g.*, sub.name as subject_name, sub.color as subject_color, u.full_name as teacher_name
+       from group_students gs
+       join groups g on g.id = gs.group_id
+       left join subjects sub on sub.id = g.subject_id
+       left join users u on u.id = g.teacher_id
+       where gs.student_id = $1 order by g.name`, [id],
+    ),
+    q<any>(
+      `select a.*, l.starts_at as lesson_at, l.topic as lesson_topic, g.name as group_name
+       from attendance a
+       join lessons l on l.id = a.lesson_id
+       join groups g on g.id = l.group_id
+       where a.student_id = $1 order by l.starts_at desc limit 100`, [id],
+    ),
+    q<any>('select * from payments where student_id = $1 order by paid_at desc', [id]),
+  ]);
+
+  const paid =
+    payments.filter(p => p.kind === 'income').reduce((s, p) => s + Number(p.amount), 0)
+    - payments.filter(p => p.kind === 'refund').reduce((s, p) => s + Number(p.amount), 0);
+  const monthlyCharge = groups.reduce((s, g) => s + Number(g.monthly_fee), 0);
+
+  const total = attendance.length;
+  const presentCount = attendance.filter(a => a.status === 'present' || a.status === 'late').length;
+  const attendancePct = total ? Math.round((presentCount / total) * 100) : null;
+  const scores = attendance.filter(a => a.score != null && !Number.isNaN(Number(a.score)));
+  const avgScore = scores.length ? Math.round(scores.reduce((s, a) => s + Number(a.score), 0) / scores.length) : null;
+
+  res.json({ student, groups, attendance, payments, paid, monthlyCharge, attendancePct, avgScore });
+});
+
+// ============================================================
+// MANAGER WORKSPACE
+// ============================================================
+app.get('/api/manager/stats', requireAuth, async (req, res) => {
+  const uid = req.user!.uid;
+  const monthStart = new Date();
+  monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+
+  const [byStatus, monthSummary, stale, total, recentWon] = await Promise.all([
+    q<any>(
+      `select status, count(*)::int as count, coalesce(sum(expected_revenue), 0)::float as value
+       from leads where assigned_to = $1 group by status`, [uid],
+    ),
+    q1<any>(
+      `select
+         count(*) filter (where status = 'won')::int as won_month,
+         count(*)::int as created_month,
+         coalesce(sum(expected_revenue) filter (where status = 'won'), 0)::float as revenue_month
+       from leads where assigned_to = $1 and created_at >= $2`, [uid, monthStart.toISOString()],
+    ),
+    q<any>(
+      `select id, full_name, phone, status, expected_revenue, updated_at
+       from leads where assigned_to = $1
+         and status not in ('won', 'lost')
+         and updated_at < now() - interval '3 days'
+       order by updated_at asc limit 15`, [uid],
+    ),
+    q1<any>('select count(*)::int as total from leads where assigned_to = $1', [uid]),
+    q<any>(
+      `select id, full_name, phone, expected_revenue, updated_at
+       from leads where assigned_to = $1 and status = 'won'
+       order by updated_at desc limit 5`, [uid],
+    ),
+  ]);
+
+  res.json({ byStatus, monthSummary, stale, total, recentWon });
 });
 
 // ============================================================

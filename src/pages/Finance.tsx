@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { exportCSV } from '@/lib/csv';
 import type { Payment, PaymentKind, Student, Group, Profile } from '@/types/database';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
 import StatCard from '@/components/ui/StatCard';
-import { Plus, Wallet, TrendingUp, TrendingDown, Trash2, ArrowDownUp } from 'lucide-react';
+import { Plus, Wallet, TrendingUp, TrendingDown, Trash2, ArrowDownUp, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { fmtMoney, fmtDate } from '@/lib/format';
 
@@ -55,7 +56,27 @@ export default function FinancePage() {
       <PageHeader
         title="Финансы"
         subtitle="Доходы, расходы, зарплаты"
-        actions={<button className="btn-primary" onClick={() => setEditing({ ...empty })}><Plus size={16} /> Транзакция</button>}
+        actions={<>
+          <button className="btn-secondary" onClick={() => {
+            const rows = list.map(p => ({
+              ...p,
+              who: p.student_id ? studentsQ.data?.find((s: Student) => s.id === p.student_id)?.full_name
+                 : p.teacher_id ? usersQ.data?.find((u: Profile) => u.id === p.teacher_id)?.full_name
+                 : p.group_id   ? groupsQ.data?.find((g: Group) => g.id === p.group_id)?.name
+                 : (p.category || ''),
+            }));
+            exportCSV('payments', rows, [
+              { key: 'paid_at', label: 'Дата', format: v => fmtDate(v) },
+              { key: 'kind', label: 'Тип', format: v => KIND_LABEL[v as PaymentKind]?.label || v },
+              { key: 'amount', label: 'Сумма' },
+              { key: 'currency', label: 'Валюта' },
+              { key: 'who', label: 'Контрагент' },
+              { key: 'method', label: 'Способ' },
+              { key: 'description', label: 'Описание' },
+            ]);
+          }} disabled={!list.length}><Download size={14} /> Экспорт CSV</button>
+          <button className="btn-primary" onClick={() => setEditing({ ...empty })}><Plus size={16} /> Транзакция</button>
+        </>}
       />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">

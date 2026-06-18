@@ -9,7 +9,9 @@ import RegisterPage from '@/pages/Register';
 import DashboardPage from '@/pages/Dashboard';
 import LeadsPage from '@/pages/Leads';
 import StudentsPage from '@/pages/Students';
+import StudentDetailPage from '@/pages/StudentDetail';
 import GroupsPage from '@/pages/Groups';
+import ManagerWorkspacePage from '@/pages/ManagerWorkspace';
 import SchedulePage from '@/pages/Schedule';
 import AttendancePage from '@/pages/Attendance';
 import FinancePage from '@/pages/Finance';
@@ -38,8 +40,10 @@ export default function App() {
 
       <Route element={<RequireAuth><AppLayout /></RequireAuth>}>
         <Route path="/" element={<DashboardPage />} />
+        <Route path="/workspace" element={<RequireAuth roles={['admin','manager']}><ManagerWorkspacePage /></RequireAuth>} />
         <Route path="/leads" element={<RequireAuth roles={['admin','manager']}><LeadsPage /></RequireAuth>} />
         <Route path="/students" element={<StudentsPage />} />
+        <Route path="/students/:id" element={<StudentDetailPage />} />
         <Route path="/groups" element={<GroupsPage />} />
         <Route path="/schedule" element={<SchedulePage />} />
         <Route path="/attendance" element={<AttendancePage />} />

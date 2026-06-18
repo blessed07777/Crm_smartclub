@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { exportCSV } from '@/lib/csv';
 import type { Lead, LeadStatus } from '@/types/database';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
 import EmptyState from '@/components/ui/EmptyState';
-import { Plus, Target, Phone, User, Trash2, Edit3 } from 'lucide-react';
+import { Plus, Target, Phone, User, Trash2, Edit3, Download, Filter } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { fmtMoney } from '@/lib/format';
+import { fmtMoney, fmtDate } from '@/lib/format';
+import { useAuth } from '@/stores/auth';
 
 const STATUSES: { value: LeadStatus; label: string }[] = [
   { value: 'new',         label: 'Новый' },
@@ -25,12 +27,15 @@ const empty: Partial<Lead> = {
 
 export default function LeadsPage() {
   const qc = useQueryClient();
+  const { user } = useAuth();
   const [editing, setEditing] = useState<Partial<Lead> | null>(null);
+  const [onlyMine, setOnlyMine] = useState(user?.role === 'manager');
 
-  const { data: leads = [], isLoading } = useQuery({
+  const { data: allLeads = [], isLoading } = useQuery({
     queryKey: ['leads'],
     queryFn: () => api.leads.list({ orderBy: 'created_at', order: 'desc' }),
   });
+  const leads = onlyMine ? allLeads.filter(l => l.assigned_to === user?.id) : allLeads;
 
   const save = useMutation({
     mutationFn: async (l: Partial<Lead>) =>
@@ -50,12 +55,36 @@ export default function LeadsPage() {
     items: leads.filter(l => l.status === s.value),
   }));
 
+  const onExport = () => {
+    exportCSV('leads', leads, [
+      { key: 'full_name', label: 'ФИО' },
+      { key: 'phone', label: 'Телефон' },
+      { key: 'parent_name', label: 'Родитель' },
+      { key: 'parent_phone', label: 'Тел. родителя' },
+      { key: 'grade', label: 'Класс' },
+      { key: 'source', label: 'Источник' },
+      { key: 'status', label: 'Статус', format: v => STATUSES.find(s => s.value === v)?.label || v },
+      { key: 'expected_revenue', label: 'Ожидаемая выручка' },
+      { key: 'created_at', label: 'Создан', format: v => fmtDate(v) },
+      { key: 'note', label: 'Заметка' },
+    ]);
+  };
+
   return (
     <div>
       <PageHeader
         title="Лиды и воронка продаж"
-        subtitle="Канбан-доска заявок от учеников и родителей"
-        actions={<button className="btn-primary" onClick={() => setEditing({ ...empty })}><Plus size={16} /> Новый лид</button>}
+        subtitle={onlyMine ? 'Только мои лиды' : 'Все заявки школы'}
+        actions={<>
+          <button
+            className={`btn-secondary ${onlyMine ? 'bg-brand-50 border-brand-300 text-brand-700' : ''}`}
+            onClick={() => setOnlyMine(v => !v)}
+          >
+            <Filter size={14} /> {onlyMine ? 'Все' : 'Только мои'}
+          </button>
+          <button className="btn-secondary" onClick={onExport} disabled={!leads.length}><Download size={14} /> CSV</button>
+          <button className="btn-primary" onClick={() => setEditing({ ...empty })}><Plus size={16} /> Новый лид</button>
+        </>}
       />
 
       {isLoading ? (

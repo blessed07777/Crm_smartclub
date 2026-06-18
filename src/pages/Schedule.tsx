@@ -5,9 +5,10 @@ import type { Lesson, Group } from '@/types/database';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
 import EmptyState from '@/components/ui/EmptyState';
-import { Plus, CalendarDays, Trash2, Edit3 } from 'lucide-react';
+import { Plus, CalendarDays, Trash2, Edit3, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { fmtDateTime } from '@/lib/format';
+import { exportCSV } from '@/lib/csv';
 
 const empty: Partial<Lesson> = {
   group_id: '', starts_at: '', ends_at: '', topic: '', homework: '', is_canceled: false,
@@ -57,7 +58,23 @@ export default function SchedulePage() {
       <PageHeader
         title="Расписание занятий"
         subtitle="Все уроки школы по дням"
-        actions={<button className="btn-primary" onClick={() => setEditing({ ...empty, starts_at: nowLocal(2), ends_at: nowLocal(3.5) })}><Plus size={16} /> Новый урок</button>}
+        actions={<>
+          <button className="btn-secondary" onClick={() => {
+            const rows = (lessonsQ.data || []).map(l => ({
+              ...l,
+              group_name: groupName(l.group_id),
+            }));
+            exportCSV('lessons', rows, [
+              { key: 'starts_at', label: 'Начало', format: v => fmtDateTime(v) },
+              { key: 'ends_at', label: 'Конец', format: v => fmtDateTime(v) },
+              { key: 'group_name', label: 'Группа' },
+              { key: 'topic', label: 'Тема' },
+              { key: 'homework', label: 'ДЗ' },
+              { key: 'is_canceled', label: 'Отменён', format: v => v ? 'да' : 'нет' },
+            ]);
+          }} disabled={!(lessonsQ.data || []).length}><Download size={14} /> CSV</button>
+          <button className="btn-primary" onClick={() => setEditing({ ...empty, starts_at: nowLocal(2), ends_at: nowLocal(3.5) })}><Plus size={16} /> Новый урок</button>
+        </>}
       />
 
       {lessonsQ.isLoading ? <div className="text-slate-500">Загрузка…</div>

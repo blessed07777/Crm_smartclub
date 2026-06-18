@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/stores/auth';
+import { api } from '@/lib/api';
 import toast from 'react-hot-toast';
 import { Mail, Lock, LogIn } from 'lucide-react';
 
@@ -8,6 +9,13 @@ export default function LoginPage() {
   const { signIn, loading } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [canPublicRegister, setCanPublicRegister] = useState(false);
+
+  useEffect(() => {
+    api.auth.canRegisterPublic()
+      .then(r => setCanPublicRegister(r.allowed))
+      .catch(() => setCanPublicRegister(false));
+  }, []);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,9 +58,15 @@ export default function LoginPage() {
         </button>
       </form>
 
-      <p className="text-sm text-slate-500 mt-6 text-center">
-        Нет аккаунта? <Link to="/register" className="text-brand-600 font-medium hover:underline">Зарегистрироваться</Link>
-      </p>
+      {canPublicRegister ? (
+        <p className="text-sm text-slate-500 mt-6 text-center">
+          Первый запуск? <Link to="/register" className="text-brand-600 font-medium hover:underline">Создать аккаунт администратора</Link>
+        </p>
+      ) : (
+        <p className="text-xs text-slate-400 mt-6 text-center">
+          Нет аккаунта? Обратитесь к администратору школы для приглашения.
+        </p>
+      )}
     </div>
   );
 }

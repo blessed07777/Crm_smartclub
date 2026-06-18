@@ -5,9 +5,10 @@ import type { Group, Subject, Profile, Student } from '@/types/database';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
 import EmptyState from '@/components/ui/EmptyState';
-import { Plus, GraduationCap, Trash2, Edit3, Users } from 'lucide-react';
+import { Plus, GraduationCap, Trash2, Edit3, Users, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { fmtMoney } from '@/lib/format';
+import { exportCSV } from '@/lib/csv';
 
 const empty: Partial<Group> = {
   name: '', subject_id: null, teacher_id: null, monthly_fee: 30000, capacity: 12,
@@ -41,7 +42,27 @@ export default function GroupsPage() {
       <PageHeader
         title="Группы и потоки"
         subtitle="Учебные группы по предметам ЕНТ"
-        actions={<button className="btn-primary" onClick={() => setEditing({ ...empty })}><Plus size={16} /> Новая группа</button>}
+        actions={<>
+          <button className="btn-secondary" onClick={() => {
+            const rows = (groupsQ.data || []).map(g => ({
+              ...g,
+              subject: subjectsQ.data?.find(s => s.id === g.subject_id)?.name || '',
+              teacher: teachers.find(t => t.id === g.teacher_id)?.full_name || '',
+            }));
+            exportCSV('groups', rows, [
+              { key: 'name', label: 'Группа' },
+              { key: 'subject', label: 'Предмет' },
+              { key: 'teacher', label: 'Преподаватель' },
+              { key: 'monthly_fee', label: 'Стоимость/мес' },
+              { key: 'capacity', label: 'Вместимость' },
+              { key: 'schedule_summary', label: 'Расписание' },
+              { key: 'starts_on', label: 'Старт' },
+              { key: 'ends_on', label: 'Конец' },
+              { key: 'is_active', label: 'Активна', format: v => v ? 'да' : 'нет' },
+            ]);
+          }} disabled={!(groupsQ.data || []).length}><Download size={15} /> Экспорт CSV</button>
+          <button className="btn-primary" onClick={() => setEditing({ ...empty })}><Plus size={16} /> Новая группа</button>
+        </>}
       />
 
       {groupsQ.isLoading ? (

@@ -1,4 +1,4 @@
-import type { Profile, Subject, Lead, Student, Group, Lesson, Payment, Attendance } from '@/types/database';
+import type { Profile, Subject, Lead, Student, Group, Lesson, Payment, Attendance, UserRole } from '@/types/database';
 
 const TOKEN_KEY = 'smartclub_token';
 
@@ -39,6 +39,25 @@ function crud<T>(base: string) {
   };
 }
 
+export interface StudentProfile {
+  student: Student;
+  groups: (Group & { subject_name: string | null; subject_color: string | null; teacher_name: string | null })[];
+  attendance: (Attendance & { lesson_at: string; lesson_topic: string | null; group_name: string })[];
+  payments: Payment[];
+  paid: number;
+  monthlyCharge: number;
+  attendancePct: number | null;
+  avgScore: number | null;
+}
+
+export interface ManagerStats {
+  byStatus: { status: string; count: number; value: number }[];
+  monthSummary: { won_month: number; created_month: number; revenue_month: number } | null;
+  stale: { id: string; full_name: string; phone: string; status: string; expected_revenue: number | null; updated_at: string }[];
+  recentWon: { id: string; full_name: string; phone: string; expected_revenue: number | null; updated_at: string }[];
+  total: { total: number } | null;
+}
+
 export const api = {
   token: {
     get:  () => localStorage.getItem(TOKEN_KEY),
@@ -47,23 +66,29 @@ export const api = {
   },
 
   auth: {
+    canRegisterPublic: () => call<{ allowed: boolean }>('/api/auth/can-register-public'),
     login:    (email: string, password: string) =>
       call<{ token: string; user: Profile }>('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
-    register: (email: string, password: string, full_name: string, role: string) =>
-      call<{ token: string; user: Profile }>('/api/auth/register', { method: 'POST', body: JSON.stringify({ email, password, full_name, role }) }),
+    register: (email: string, password: string, full_name: string, role: UserRole) =>
+      call<{ token?: string; user: Profile }>('/api/auth/register', { method: 'POST', body: JSON.stringify({ email, password, full_name, role }) }),
     me:       () => call<Profile>('/api/auth/me'),
     updateMe: (data: Partial<Profile>) => call<Profile>('/api/auth/me', { method: 'PATCH', body: JSON.stringify(data) }),
     changePassword: (current_password: string, new_password: string) =>
       call<{ ok: true }>('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ current_password, new_password }) }),
   },
 
-  users:    {
+  users: {
     ...crud<Profile>('/api/users'),
     list: () => call<Profile[]>('/api/users'),
   },
   subjects: crud<Subject>('/api/subjects'),
-  leads:    crud<Lead>('/api/leads'),
-  students: crud<Student>('/api/students'),
+  leads:    {
+    ...crud<Lead>('/api/leads'),
+  },
+  students: {
+    ...crud<Student>('/api/students'),
+    profile: (id: string) => call<StudentProfile>(`/api/students/${id}/profile`),
+  },
   groups:   {
     ...crud<Group>('/api/groups'),
     roster: (id: string) => call<Student[]>(`/api/groups/${id}/roster`),
@@ -90,6 +115,10 @@ export const api = {
       upcoming: { id: string; group_id: string; starts_at: string; topic: string | null }[];
       daily: { day: string; kind: string; total: number }[];
     }>('/api/dashboard/stats'),
+  },
+
+  manager: {
+    stats: () => call<ManagerStats>('/api/manager/stats'),
   },
 
   reports: {

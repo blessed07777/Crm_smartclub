@@ -49,8 +49,12 @@ export const useAuth = create<AuthState>((set, get) => ({
     set({ loading: true });
     try {
       const { token, user } = await api.auth.register(email, password, full_name, role);
-      api.token.set(token);
-      set({ user });
+      // Bootstrap path returns a token → log the user in.
+      // Admin-creates-staff path returns just { user } — admin's own session stays.
+      if (token) {
+        api.token.set(token);
+        set({ user });
+      }
     } finally {
       set({ loading: false });
     }

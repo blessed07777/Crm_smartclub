@@ -1,11 +1,13 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { exportCSV } from '@/lib/csv';
 import type { Student, StudentStatus } from '@/types/database';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
 import EmptyState from '@/components/ui/EmptyState';
-import { Plus, Users, Trash2, Edit3, Search } from 'lucide-react';
+import { Plus, Users, Trash2, Edit3, Search, Download, ExternalLink } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { fmtDate } from '@/lib/format';
 
@@ -47,12 +49,30 @@ export default function StudentsPage() {
     !q || s.full_name.toLowerCase().includes(q.toLowerCase()) || (s.phone||'').includes(q),
   );
 
+  const onExport = () => {
+    exportCSV('students', filtered, [
+      { key: 'full_name', label: 'ФИО' },
+      { key: 'phone', label: 'Телефон ученика' },
+      { key: 'parent_name', label: 'Родитель' },
+      { key: 'parent_phone', label: 'Тел. родителя' },
+      { key: 'grade', label: 'Класс' },
+      { key: 'school', label: 'Школа' },
+      { key: 'target_score', label: 'Цель ЕНТ' },
+      { key: 'status', label: 'Статус', format: v => STATUS_LABELS[v as StudentStatus]?.label || v },
+      { key: 'enrolled_at', label: 'Зачислен', format: v => fmtDate(v) },
+      { key: 'note', label: 'Заметка' },
+    ]);
+  };
+
   return (
     <div>
       <PageHeader
         title="Ученики"
         subtitle="Карточки всех учеников школы"
-        actions={<button className="btn-primary" onClick={() => setEditing({ ...empty })}><Plus size={16} /> Добавить ученика</button>}
+        actions={<>
+          <button className="btn-secondary" onClick={onExport} disabled={!filtered.length}><Download size={15} /> Экспорт CSV</button>
+          <button className="btn-primary" onClick={() => setEditing({ ...empty })}><Plus size={16} /> Добавить ученика</button>
+        </>}
       />
 
       <div className="card p-4 mb-4 flex items-center gap-3">
@@ -90,7 +110,11 @@ export default function StudentsPage() {
             <tbody>
               {filtered.map(s => (
                 <tr key={s.id} className="hover:bg-slate-50">
-                  <td className="table-td font-medium text-slate-900">{s.full_name}</td>
+                  <td className="table-td font-medium text-slate-900">
+                    <Link to={`/students/${s.id}`} className="text-brand-700 hover:underline inline-flex items-center gap-1">
+                      {s.full_name} <ExternalLink size={12} className="text-slate-400" />
+                    </Link>
+                  </td>
                   <td className="table-td">{s.grade ?? '—'}</td>
                   <td className="table-td">{s.school || '—'}</td>
                   <td className="table-td">{s.phone || s.parent_phone || '—'}</td>
@@ -98,6 +122,7 @@ export default function StudentsPage() {
                   <td className="table-td">{fmtDate(s.enrolled_at)}</td>
                   <td className="table-td"><span className={STATUS_LABELS[s.status].tone}>{STATUS_LABELS[s.status].label}</span></td>
                   <td className="table-td text-right">
+                    <Link to={`/students/${s.id}`} className="btn-ghost p-1.5 inline-flex" title="Открыть карточку"><ExternalLink size={15} /></Link>
                     <button onClick={() => setEditing(s)} className="btn-ghost p-1.5"><Edit3 size={15} /></button>
                     <button onClick={() => confirm(`Удалить «${s.full_name}»?`) && del.mutate(s.id)} className="btn-ghost p-1.5 text-rose-600"><Trash2 size={15} /></button>
                   </td>
