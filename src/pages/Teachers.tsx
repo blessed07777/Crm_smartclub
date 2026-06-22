@@ -5,7 +5,7 @@ import type { Profile, UserRole } from '@/types/database';
 import PageHeader from '@/components/ui/PageHeader';
 import EmptyState from '@/components/ui/EmptyState';
 import Modal from '@/components/ui/Modal';
-import { UserCog, Power, UserPlus, Download, Trash2 } from 'lucide-react';
+import { UserCog, Power, UserPlus, Download, Trash2, Edit3 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { fmtDate } from '@/lib/format';
 import { exportCSV } from '@/lib/csv';
@@ -17,17 +17,23 @@ const ROLE: Record<UserRole, { label: string; tone: string }> = {
   teacher: { label: 'Преподаватель', tone: 'badge-green' },
 };
 
+const COMMON_SUBJECTS = [
+  'Математика','Физика','Химия','Биология','История Казахстана','Грамотность чтения',
+  'Математическая грамотность','Английский язык','Казахский язык','Русский язык','Информатика',
+];
+
 export default function TeachersPage() {
   const qc = useQueryClient();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<Profile | null>(null);
 
   const usersQ = useQuery({ queryKey: ['users'], queryFn: () => api.users.list() });
 
   const update = useMutation({
     mutationFn: (p: Partial<Profile> & { id: string }) => api.users.update(p.id, p),
-    onSuccess: () => { toast.success('Обновлено'); qc.invalidateQueries({ queryKey: ['users'] }); },
+    onSuccess: () => { toast.success('Обновлено'); setEditing(null); qc.invalidateQueries({ queryKey: ['users'] }); },
     onError: (e: any) => toast.error(e.message),
   });
 
@@ -43,6 +49,8 @@ export default function TeachersPage() {
       { key: 'full_name', label: 'ФИО' },
       { key: 'email', label: 'Email' },
       { key: 'role', label: 'Роль', format: v => ROLE[v as UserRole]?.label || v },
+      { key: 'specialty', label: 'Предмет / специализация' },
+      { key: 'workplace', label: 'Место работы' },
       { key: 'phone', label: 'Телефон' },
       { key: 'is_active', label: 'Активен', format: v => v ? 'да' : 'нет' },
       { key: 'created_at', label: 'Создан', format: v => fmtDate(v) },
@@ -74,10 +82,11 @@ export default function TeachersPage() {
             <thead className="bg-slate-50">
               <tr>
                 <th className="table-th">ФИО</th>
-                <th className="table-th">Email</th>
                 <th className="table-th">Роль</th>
+                <th className="table-th">Предмет</th>
+                <th className="table-th">Место работы</th>
+                <th className="table-th">Email</th>
                 <th className="table-th">Телефон</th>
-                <th className="table-th">Создан</th>
                 <th className="table-th">Статус</th>
                 <th className="table-th"></th>
               </tr>
@@ -86,11 +95,10 @@ export default function TeachersPage() {
               {(usersQ.data || []).map((p: Profile) => (
                 <tr key={p.id} className="hover:bg-slate-50">
                   <td className="table-td font-medium">{p.full_name || '—'}</td>
-                  <td className="table-td">{p.email || '—'}</td>
                   <td className="table-td">
                     {isAdmin ? (
                       <select
-                        className="input w-44 py-1"
+                        className="input w-40 py-1"
                         value={p.role}
                         onChange={e => update.mutate({ id: p.id, role: e.target.value as UserRole })}
                       >
@@ -100,12 +108,15 @@ export default function TeachersPage() {
                       <span className={ROLE[p.role].tone}>{ROLE[p.role].label}</span>
                     )}
                   </td>
+                  <td className="table-td text-slate-700">{p.specialty || '—'}</td>
+                  <td className="table-td text-slate-700">{p.workplace || '—'}</td>
+                  <td className="table-td text-slate-500 text-xs">{p.email || '—'}</td>
                   <td className="table-td">{p.phone || '—'}</td>
-                  <td className="table-td">{fmtDate(p.created_at)}</td>
                   <td className="table-td"><span className={p.is_active ? 'badge-green' : 'badge-slate'}>{p.is_active ? 'Активен' : 'Отключён'}</span></td>
-                  <td className="table-td text-right">
+                  <td className="table-td text-right whitespace-nowrap">
                     {isAdmin && (
                       <>
+                        <button onClick={() => setEditing(p)} className="btn-ghost p-1.5" title="Редактировать"><Edit3 size={15} /></button>
                         <button
                           onClick={() => update.mutate({ id: p.id, is_active: !p.is_active })}
                           className="btn-ghost p-1.5"
@@ -135,7 +146,46 @@ export default function TeachersPage() {
       {adding && (
         <AddStaffModal onClose={() => setAdding(false)} onSaved={() => { setAdding(false); qc.invalidateQueries({ queryKey: ['users'] }); }} />
       )}
+
+      {editing && (
+        <EditStaffModal value={editing} saving={update.isPending} onClose={() => setEditing(null)} onSave={p => update.mutate(p as any)} />
+      )}
     </div>
+  );
+}
+
+function EditStaffModal({ value, saving, onClose, onSave }: {
+  value: Profile; saving: boolean; onClose: () => void; onSave: (p: Partial<Profile> & { id: string }) => void;
+}) {
+  const [form, setForm] = useState<Profile>(value);
+  return (
+    <Modal open onClose={onClose} title={`Редактировать: ${value.full_name}`}
+      footer={<>
+        <button className="btn-secondary" onClick={onClose}>Отмена</button>
+        <button className="btn-primary" disabled={saving} onClick={() => onSave({
+          id: value.id,
+          full_name: form.full_name,
+          phone: form.phone,
+          email: form.email,
+          specialty: form.specialty ?? null,
+          workplace: form.workplace ?? null,
+        })}>Сохранить</button>
+      </>}
+    >
+      <div className="grid grid-cols-2 gap-3">
+        <div className="col-span-2"><label className="label">ФИО</label><input className="input" value={form.full_name||''} onChange={e=>setForm({...form, full_name: e.target.value})} /></div>
+        <div><label className="label">Email</label><input type="email" className="input" value={form.email||''} onChange={e=>setForm({...form, email: e.target.value})} /></div>
+        <div><label className="label">Телефон</label><input className="input" value={form.phone||''} onChange={e=>setForm({...form, phone: e.target.value})} /></div>
+        <div>
+          <label className="label">Предмет / специализация</label>
+          <input className="input" list="subjects-suggest" value={form.specialty||''} onChange={e=>setForm({...form, specialty: e.target.value})} placeholder="математика, физика…" />
+          <datalist id="subjects-suggest">
+            {COMMON_SUBJECTS.map(s => <option key={s} value={s} />)}
+          </datalist>
+        </div>
+        <div><label className="label">Место работы</label><input className="input" value={form.workplace||''} onChange={e=>setForm({...form, workplace: e.target.value})} placeholder="РФМШ, БИЛ, Smart Club…" /></div>
+      </div>
+    </Modal>
   );
 }
 
@@ -154,7 +204,7 @@ function AddStaffModal({ onClose, onSaved }: { onClose: () => void; onSaved: () 
     setSaving(true);
     try {
       await api.auth.register(email.trim(), password, fullName.trim() || email, role);
-      toast.success(`Сотрудник добавлен. Логин: ${email}, пароль вы можете передать вручную.`);
+      toast.success(`Сотрудник добавлен. Логин: ${email}`);
       onSaved();
     } catch (e: any) {
       toast.error(e.message);
@@ -174,6 +224,7 @@ function AddStaffModal({ onClose, onSaved }: { onClose: () => void; onSaved: () 
         <div className="bg-blue-50 border border-blue-200 text-blue-800 text-xs rounded-lg p-3">
           Сотрудник сразу сможет войти с указанными email и паролем.
           Передайте ему данные лично — пароль виден только при создании.
+          Предмет и место работы можно заполнить после создания через «Редактировать».
         </div>
         <div><label className="label">ФИО</label><input className="input" value={fullName} onChange={e => setFullName(e.target.value)} placeholder="Айгерим Серикова" /></div>
         <div><label className="label">Email *</label><input type="email" className="input" value={email} onChange={e => setEmail(e.target.value)} required /></div>

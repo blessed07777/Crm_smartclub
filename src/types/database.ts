@@ -30,6 +30,8 @@ export interface Profile {
   full_name: string;
   phone: string | null;
   role: UserRole;
+  specialty?: string | null;
+  workplace?: string | null;
   avatar_url?: string | null;
   is_active: boolean;
   created_at: string;

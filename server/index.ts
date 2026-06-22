@@ -272,7 +272,7 @@ app.use('/api/tasks', resource({
 // ============================================================
 // USERS (custom — role gating, no password fields exposed)
 // ============================================================
-const userFields = 'id, email, full_name, role, phone, is_active, created_at, updated_at';
+const userFields = 'id, email, full_name, role, phone, specialty, workplace, is_active, created_at, updated_at';
 
 app.get('/api/users', requireAuth, async (_req, res) => {
   const rows = await q(`select ${userFields} from users order by created_at desc`);
@@ -280,21 +280,24 @@ app.get('/api/users', requireAuth, async (_req, res) => {
 });
 
 app.patch('/api/users/:id', requireAuth, requireRole('admin', 'manager'), async (req, res) => {
-  const { full_name, phone, role, is_active } = req.body || {};
+  const { full_name, phone, role, is_active, specialty, workplace, email } = req.body || {};
   if (role && !['admin','manager','teacher'].includes(role)) return res.status(400).json({ error: 'invalid role' });
-  // Role and account-disable are admin-only
   const isAdmin = req.user?.role === 'admin';
   const safeRole = isAdmin ? (role ?? null) : null;
   const safeActive = isAdmin ? (is_active ?? null) : null;
+  const safeEmail = isAdmin && email ? String(email).toLowerCase() : null;
   const row = await q1(
     `update users set
-        full_name = coalesce($1, full_name),
-        phone = coalesce($2, phone),
-        role = coalesce($3, role),
-        is_active = coalesce($4, is_active),
+        full_name  = coalesce($1, full_name),
+        phone      = coalesce($2, phone),
+        role       = coalesce($3, role),
+        is_active  = coalesce($4, is_active),
+        specialty  = coalesce($5, specialty),
+        workplace  = coalesce($6, workplace),
+        email      = coalesce($7, email),
         updated_at = now()
-     where id = $5 returning ${userFields}`,
-    [full_name ?? null, phone ?? null, safeRole, safeActive, req.params.id],
+     where id = $8 returning ${userFields}`,
+    [full_name ?? null, phone ?? null, safeRole, safeActive, specialty ?? null, workplace ?? null, safeEmail, req.params.id],
   );
   res.json(row);
 });
