@@ -11,7 +11,20 @@ import { isBefore, isToday, parseISO, format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import clsx from 'clsx';
 
+import TeacherWorkspace from '@/pages/TeacherWorkspace';
+import ManagerWorkspace from '@/pages/ManagerWorkspace';
+
 export default function DashboardPage() {
+  const { user } = useAuth();
+
+  // Role-aware root: teachers and managers get their own workspace as Home
+  if (user?.role === 'teacher') return <TeacherWorkspace />;
+  if (user?.role === 'manager') return <ManagerWorkspace />;
+
+  return <AdminDashboard />;
+}
+
+function AdminDashboard() {
   const { user } = useAuth();
   const { data } = useQuery({
     queryKey: ['dashboard-stats'],
@@ -90,7 +103,6 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* My tasks widget */}
       <div className="card p-5 mt-6">
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-semibold text-slate-900 flex items-center gap-2">

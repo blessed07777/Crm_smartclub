@@ -8,20 +8,49 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 
-const nav = [
-  { to: '/', label: 'Дашборд', icon: LayoutDashboard, roles: ['admin','manager','teacher'] },
-  { to: '/workspace', label: 'Мой кабинет', icon: Briefcase, roles: ['admin','manager'] },
-  { to: '/tasks', label: 'Задачи и планы', icon: ClipboardList, roles: ['admin','manager','teacher'] },
-  { to: '/leads', label: 'Лиды', icon: Target, roles: ['admin','manager'] },
-  { to: '/students', label: 'Ученики', icon: Users, roles: ['admin','manager','teacher'] },
-  { to: '/groups', label: 'Группы', icon: GraduationCap, roles: ['admin','manager','teacher'] },
-  { to: '/calendar', label: 'Календарь', icon: CalendarRange, roles: ['admin','manager','teacher'] },
-  { to: '/schedule', label: 'Расписание', icon: CalendarDays, roles: ['admin','manager','teacher'] },
-  { to: '/attendance', label: 'Посещаемость', icon: ClipboardCheck, roles: ['admin','manager','teacher'] },
-  { to: '/finance', label: 'Финансы', icon: Wallet, roles: ['admin','manager'] },
-  { to: '/teachers', label: 'Сотрудники', icon: UserCog, roles: ['admin','manager'] },
-  { to: '/reports', label: 'Отчёты', icon: BarChart3, roles: ['admin','manager'] },
-  { to: '/settings', label: 'Настройки', icon: Settings, roles: ['admin','manager','teacher'] },
+type NavItem = { to: string; label: string; icon: any; roles: string[]; end?: boolean };
+type NavSection = { label?: string; items: NavItem[] };
+
+const sections: NavSection[] = [
+  {
+    items: [
+      { to: '/', label: 'Главная', icon: LayoutDashboard, roles: ['admin','manager','teacher'], end: true },
+    ],
+  },
+  {
+    label: 'Продажи',
+    items: [
+      { to: '/workspace', label: 'Мой кабинет', icon: Briefcase, roles: ['admin'] }, // admin can peek
+      { to: '/leads',     label: 'Лиды',        icon: Target,    roles: ['admin','manager'] },
+      { to: '/students',  label: 'Ученики',     icon: Users,     roles: ['admin','manager'] },
+      { to: '/finance',   label: 'Финансы',     icon: Wallet,    roles: ['admin','manager'] },
+    ],
+  },
+  {
+    label: 'Учебный процесс',
+    items: [
+      { to: '/students',   label: 'Мои ученики',   icon: Users,         roles: ['teacher'] },
+      { to: '/groups',     label: 'Группы',        icon: GraduationCap, roles: ['admin'] },
+      { to: '/groups',     label: 'Мои группы',    icon: GraduationCap, roles: ['teacher'] },
+      { to: '/calendar',   label: 'Календарь',     icon: CalendarRange, roles: ['admin','teacher'] },
+      { to: '/schedule',   label: 'Расписание',    icon: CalendarDays,  roles: ['admin'] },
+      { to: '/attendance', label: 'Посещаемость',  icon: ClipboardCheck,roles: ['admin','teacher'] },
+    ],
+  },
+  {
+    label: 'Личное',
+    items: [
+      { to: '/tasks',    label: 'Задачи и планы', icon: ClipboardList, roles: ['admin','manager','teacher'] },
+      { to: '/settings', label: 'Настройки',      icon: Settings,      roles: ['admin','manager','teacher'] },
+    ],
+  },
+  {
+    label: 'Администрирование',
+    items: [
+      { to: '/teachers', label: 'Сотрудники', icon: UserCog,   roles: ['admin','manager'] },
+      { to: '/reports',  label: 'Отчёты',     icon: BarChart3, roles: ['admin','manager'] },
+    ],
+  },
 ];
 
 const roleLabel: Record<string, string> = {
@@ -30,12 +59,21 @@ const roleLabel: Record<string, string> = {
   teacher: 'Преподаватель',
 };
 
+const roleBadge: Record<string, string> = {
+  admin: 'bg-violet-100 text-violet-700',
+  manager: 'bg-blue-100 text-blue-700',
+  teacher: 'bg-emerald-100 text-emerald-700',
+};
+
 export default function AppLayout() {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const role = user?.role ?? 'manager';
-  const items = nav.filter(n => n.roles.includes(role));
+
+  const visibleSections = sections
+    .map(s => ({ ...s, items: s.items.filter(i => i.roles.includes(role)) }))
+    .filter(s => s.items.length > 0);
 
   return (
     <div className="min-h-screen flex bg-slate-50">
@@ -47,24 +85,35 @@ export default function AppLayout() {
           <div className="bg-brand-600 text-white rounded-lg p-1.5"><GraduationCap size={20} /></div>
           <div className="font-bold text-slate-900">SmartClub CRM</div>
         </div>
-        <nav className="flex-1 overflow-y-auto p-3 space-y-1">
-          {items.map(({ to, label, icon: Icon }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={to === '/'}
-              onClick={() => setOpen(false)}
-              className={({ isActive }) => clsx(
-                'flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition',
-                isActive
-                  ? 'bg-brand-50 text-brand-700'
-                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+
+        <nav className="flex-1 overflow-y-auto py-3 px-3 space-y-4">
+          {visibleSections.map((s, i) => (
+            <div key={i}>
+              {s.label && (
+                <div className="px-3 mb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">{s.label}</div>
               )}
-            >
-              <Icon size={18} />{label}
-            </NavLink>
+              <div className="space-y-0.5">
+                {s.items.map(({ to, label, icon: Icon, end }) => (
+                  <NavLink
+                    key={`${to}-${label}`}
+                    to={to}
+                    end={end}
+                    onClick={() => setOpen(false)}
+                    className={({ isActive }) => clsx(
+                      'flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition',
+                      isActive
+                        ? 'bg-brand-50 text-brand-700'
+                        : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+                    )}
+                  >
+                    <Icon size={18} />{label}
+                  </NavLink>
+                ))}
+              </div>
+            </div>
           ))}
         </nav>
+
         <div className="border-t border-slate-100 p-3">
           <div className="flex items-center gap-3 px-2 py-2">
             <div className="w-9 h-9 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-bold">
@@ -72,7 +121,9 @@ export default function AppLayout() {
             </div>
             <div className="min-w-0 flex-1">
               <div className="text-sm font-semibold text-slate-900 truncate">{user?.full_name || 'Без имени'}</div>
-              <div className="text-xs text-slate-500 truncate">{roleLabel[role]}</div>
+              <div className={clsx('text-[10px] font-semibold uppercase tracking-wider inline-block px-1.5 py-0.5 rounded mt-0.5', roleBadge[role])}>
+                {roleLabel[role]}
+              </div>
             </div>
           </div>
           <button

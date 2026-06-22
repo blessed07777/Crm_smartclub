@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type { Lesson, Group } from '@/types/database';
+import { useAuth } from '@/stores/auth';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
 import AttendanceModal from '@/components/ui/AttendanceModal';
@@ -28,6 +29,8 @@ function localDT(d: Date) {
 
 export default function CalendarPage() {
   const qc = useQueryClient();
+  const { user } = useAuth();
+  const isTeacher = user?.role === 'teacher';
   const [view, setView] = useState<View>('month');
   const [cursor, setCursor] = useState<Date>(new Date());
   const [filterGroup, setFilterGroup] = useState<string>('');
@@ -50,11 +53,19 @@ export default function CalendarPage() {
     queryKey: ['lessons-range', range.from.toISOString(), range.to.toISOString()],
     queryFn: () => api.lessons.list({ orderBy: 'starts_at', order: 'asc', limit: 1000 }),
   });
-  const groupsQ = useQuery({ queryKey: ['groups-cal'], queryFn: () => api.groups.list({ limit: 1000 }) });
+  const groupsQ = useQuery({
+    queryKey: ['groups-cal', isTeacher ? user?.id : 'all'],
+    queryFn: () => isTeacher
+      ? api.groups.list({ limit: 1000, teacher_id: user!.id })
+      : api.groups.list({ limit: 1000 }),
+  });
 
+  // For teachers: only show lessons of their own groups
+  const myGroupIds = new Set((groupsQ.data || []).map(g => g.id));
   const lessons = (lessonsQ.data || []).filter(l => {
     const d = parseISO(l.starts_at);
     if (d < range.from || d > range.to) return false;
+    if (isTeacher && !myGroupIds.has(l.group_id)) return false;
     if (filterGroup && l.group_id !== filterGroup) return false;
     return true;
   });

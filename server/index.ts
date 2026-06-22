@@ -350,6 +350,73 @@ app.get('/api/students/:id/profile', requireAuth, async (req, res) => {
 });
 
 // ============================================================
+// TEACHER WORKSPACE
+// ============================================================
+app.get('/api/teacher/dashboard', requireAuth, async (req, res) => {
+  const uid = req.user!.uid;
+
+  const groups = await q<any>(
+    `select g.id, g.name, g.monthly_fee, g.schedule_summary, g.is_active,
+            sub.name as subject_name, sub.color as subject_color,
+            (select count(*) from group_students where group_id = g.id)::int as students_count
+     from groups g
+     left join subjects sub on sub.id = g.subject_id
+     where g.teacher_id = $1
+     order by g.is_active desc, g.name`,
+    [uid],
+  );
+
+  const groupIds = groups.map(g => g.id);
+
+  const week = groupIds.length === 0 ? [] : await q<any>(
+    `select l.*, g.name as group_name
+     from lessons l
+     join groups g on g.id = l.group_id
+     where l.group_id = any($1::uuid[])
+       and l.starts_at >= (current_date)::timestamptz
+       and l.starts_at <  (current_date + interval '8 days')::timestamptz
+     order by l.starts_at`,
+    [groupIds],
+  );
+
+  const todayLessons = week.filter(l => String(l.starts_at).slice(0,10) === new Date().toISOString().slice(0,10));
+
+  const studentRow = groupIds.length === 0 ? null : await q1<{ c: number | string }>(
+    `select count(distinct student_id)::int as c
+     from group_students where group_id = any($1::uuid[])`,
+    [groupIds],
+  );
+
+  const recentAttendance = groupIds.length === 0 ? [] : await q<any>(
+    `select a.status, count(*)::int as n
+     from attendance a
+     join lessons l on l.id = a.lesson_id
+     where l.group_id = any($1::uuid[])
+       and l.starts_at >= now() - interval '30 days'
+     group by a.status`,
+    [groupIds],
+  );
+
+  const myTasks = await q<any>(
+    `select id, title, due_at, priority, status, kind
+     from tasks
+     where assigned_to = $1 and status in ('open','in_progress')
+     order by case when due_at is null then 1 else 0 end, due_at asc
+     limit 6`,
+    [uid],
+  );
+
+  res.json({
+    groups,
+    week,
+    todayLessons,
+    studentCount: Number(studentRow?.c ?? 0),
+    attendance30: recentAttendance,
+    myTasks,
+  });
+});
+
+// ============================================================
 // MANAGER WORKSPACE
 // ============================================================
 app.get('/api/manager/stats', requireAuth, async (req, res) => {

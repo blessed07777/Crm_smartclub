@@ -47,9 +47,9 @@ export default function App() {
         <Route path="/students" element={<StudentsPage />} />
         <Route path="/students/:id" element={<StudentDetailPage />} />
         <Route path="/groups" element={<GroupsPage />} />
-        <Route path="/calendar" element={<CalendarPage />} />
-        <Route path="/schedule" element={<SchedulePage />} />
-        <Route path="/attendance" element={<AttendancePage />} />
+        <Route path="/calendar" element={<RequireAuth roles={['admin','teacher']}><CalendarPage /></RequireAuth>} />
+        <Route path="/schedule" element={<RequireAuth roles={['admin']}><SchedulePage /></RequireAuth>} />
+        <Route path="/attendance" element={<RequireAuth roles={['admin','teacher']}><AttendancePage /></RequireAuth>} />
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/finance" element={<RequireAuth roles={['admin','manager']}><FinancePage /></RequireAuth>} />
         <Route path="/teachers" element={<RequireAuth roles={['admin','manager']}><TeachersPage /></RequireAuth>} />

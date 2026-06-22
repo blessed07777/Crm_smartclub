@@ -124,6 +124,17 @@ export const api = {
     stats: () => call<ManagerStats>('/api/manager/stats'),
   },
 
+  teacher: {
+    dashboard: () => call<{
+      groups: (Group & { subject_name: string | null; subject_color: string | null; students_count: number })[];
+      week: (Lesson & { group_name: string })[];
+      todayLessons: (Lesson & { group_name: string })[];
+      studentCount: number;
+      attendance30: { status: string; n: number }[];
+      myTasks: { id: string; title: string; due_at: string | null; priority: string; status: string; kind: string }[];
+    }>('/api/teacher/dashboard'),
+  },
+
   reports: {
     monthly:      () => call<{ month: string; income: number | null; expense: number | null }[]>('/api/reports/monthly'),
     leadsFunnel:  () => call<{ name: string; value: number }[]>('/api/reports/leads-funnel'),

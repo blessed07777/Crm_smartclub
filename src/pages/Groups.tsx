@@ -9,6 +9,7 @@ import { Plus, GraduationCap, Trash2, Edit3, Users, Download } from 'lucide-reac
 import toast from 'react-hot-toast';
 import { fmtMoney } from '@/lib/format';
 import { exportCSV } from '@/lib/csv';
+import { useAuth } from '@/stores/auth';
 
 const empty: Partial<Group> = {
   name: '', subject_id: null, teacher_id: null, monthly_fee: 30000, capacity: 12,
@@ -17,10 +18,17 @@ const empty: Partial<Group> = {
 
 export default function GroupsPage() {
   const qc = useQueryClient();
+  const { user } = useAuth();
+  const isTeacher = user?.role === 'teacher';
   const [editing, setEditing] = useState<Partial<Group> | null>(null);
   const [rosterFor, setRosterFor] = useState<Group | null>(null);
 
-  const groupsQ   = useQuery({ queryKey: ['groups'],   queryFn: () => api.groups.list({ orderBy: 'created_at', order: 'desc' }) });
+  const groupsQ = useQuery({
+    queryKey: ['groups', isTeacher ? user?.id : 'all'],
+    queryFn: () => isTeacher
+      ? api.groups.list({ orderBy: 'created_at', order: 'desc', teacher_id: user!.id })
+      : api.groups.list({ orderBy: 'created_at', order: 'desc' }),
+  });
   const subjectsQ = useQuery({ queryKey: ['subjects'], queryFn: () => api.subjects.list({ orderBy: 'name', order: 'asc' }) });
   const usersQ    = useQuery({ queryKey: ['users-all'],queryFn: () => api.users.list() });
 
@@ -40,8 +48,8 @@ export default function GroupsPage() {
   return (
     <div>
       <PageHeader
-        title="Группы и потоки"
-        subtitle="Учебные группы по предметам ЕНТ"
+        title={isTeacher ? 'Мои группы' : 'Группы и потоки'}
+        subtitle={isTeacher ? 'Группы, где вы преподаватель' : 'Учебные группы по предметам ЕНТ'}
         actions={<>
           <button className="btn-secondary" onClick={() => {
             const rows = (groupsQ.data || []).map(g => ({
@@ -61,7 +69,7 @@ export default function GroupsPage() {
               { key: 'is_active', label: 'Активна', format: v => v ? 'да' : 'нет' },
             ]);
           }} disabled={!(groupsQ.data || []).length}><Download size={15} /> Экспорт CSV</button>
-          <button className="btn-primary" onClick={() => setEditing({ ...empty })}><Plus size={16} /> Новая группа</button>
+          {!isTeacher && <button className="btn-primary" onClick={() => setEditing({ ...empty })}><Plus size={16} /> Новая группа</button>}
         </>}
       />
 

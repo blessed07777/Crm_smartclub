@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type { Lesson, AttendanceStatus } from '@/types/database';
+import { useAuth } from '@/stores/auth';
 import PageHeader from '@/components/ui/PageHeader';
 import EmptyState from '@/components/ui/EmptyState';
 import { ClipboardCheck, Check, X, Clock, AlertCircle } from 'lucide-react';
@@ -17,9 +18,18 @@ const STATUS: { value: AttendanceStatus; label: string; icon: any; tone: string 
 
 export default function AttendancePage() {
   const qc = useQueryClient();
+  const { user } = useAuth();
+  const isTeacher = user?.role === 'teacher';
   const [lessonId, setLessonId] = useState<string>('');
 
-  const lessonsQ = useQuery({ queryKey: ['lessons-recent'], queryFn: () => api.lessons.list({ orderBy: 'starts_at', order: 'desc', limit: 50 }) });
+  const lessonsQ = useQuery({ queryKey: ['lessons-recent'], queryFn: () => api.lessons.list({ orderBy: 'starts_at', order: 'desc', limit: 100 }) });
+  const groupsQ  = useQuery({
+    queryKey: ['groups-att', isTeacher ? user?.id : 'all'],
+    enabled: isTeacher,
+    queryFn: () => api.groups.list({ limit: 1000, teacher_id: user!.id }),
+  });
+  const myGroupIds = useMemo(() => new Set((groupsQ.data || []).map(g => g.id)), [groupsQ.data]);
+  const visibleLessons = (lessonsQ.data || []).filter(l => !isTeacher || myGroupIds.has(l.group_id));
   const rosterQ = useQuery({
     queryKey: ['lesson-roster', lessonId],
     enabled: !!lessonId,
@@ -43,7 +53,7 @@ export default function AttendancePage() {
         <label className="label">Выберите урок</label>
         <select className="input max-w-2xl" value={lessonId} onChange={e => setLessonId(e.target.value)}>
           <option value="">—</option>
-          {(lessonsQ.data || []).map((l: Lesson) => (
+          {visibleLessons.map((l: Lesson) => (
             <option key={l.id} value={l.id}>{fmtDateTime(l.starts_at)} — {l.topic || 'Без темы'}</option>
           ))}
         </select>
