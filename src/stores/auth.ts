@@ -20,6 +20,13 @@ export const useAuth = create<AuthState>((set, get) => ({
 
   init: async () => {
     if (get().initialized) return;
+    // Wire 401 → drop session and redirect to /login (handled by RequireAuth on next render)
+    api.on401(() => {
+      set({ user: null });
+      if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
+    });
     const token = api.token.get();
     if (!token) {
       set({ initialized: true });

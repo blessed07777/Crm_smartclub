@@ -22,9 +22,11 @@ export default function SettingsPage() {
   }, [user]);
 
   const save = async () => {
+    const name = fullName.trim();
+    if (!name) { toast.error('ФИО не может быть пустым'); return; }
     setSaving(true);
     try {
-      await api.auth.updateMe({ full_name: fullName, phone });
+      await api.auth.updateMe({ full_name: name, phone: phone.trim() });
       toast.success('Сохранено');
       refreshProfile();
     } catch (e: any) {

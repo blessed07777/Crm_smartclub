@@ -147,13 +147,19 @@ export default function ManagerWorkspace() {
                     <td className="table-td">{fmtMoney(Number(l.expected_revenue || 0))}</td>
                     <td className="table-td text-slate-500">{fmtDate(l.updated_at)}</td>
                     <td className="table-td text-right">
-                      <a
-                        href={`https://wa.me/${l.phone.replace(/\D/g,'')}?text=${encodeURIComponent('Здравствуйте! Это SmartClub, напоминаю про подготовку к ЕНТ.')}`}
-                        target="_blank" rel="noreferrer"
-                        className="btn-ghost p-1.5" title="Написать в WhatsApp"
-                      >
-                        💬
-                      </a>
+                      {(() => {
+                        const digits = (l.phone || '').replace(/\D/g, '');
+                        if (!digits) return <span className="text-slate-300 text-xs">—</span>;
+                        return (
+                          <a
+                            href={`https://wa.me/${digits}?text=${encodeURIComponent('Здравствуйте! Это SmartClub, напоминаю про подготовку к ЕНТ.')}`}
+                            target="_blank" rel="noreferrer"
+                            className="btn-ghost p-1.5" title="Написать в WhatsApp"
+                          >
+                            💬
+                          </a>
+                        );
+                      })()}
                     </td>
                   </tr>
                 ))}

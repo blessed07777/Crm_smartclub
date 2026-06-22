@@ -106,11 +106,15 @@ export default function CalendarPage() {
     else setCursor(c => addDays(c, dir));
   };
 
-  const title = view === 'month'
-    ? format(cursor, 'LLLL yyyy', { locale: ru })
-    : view === 'week'
-    ? `${format(range.from, 'd MMM', { locale: ru })} — ${format(range.to, 'd MMM yyyy', { locale: ru })}`
-    : format(cursor, 'EEEE, d MMMM yyyy', { locale: ru });
+  const title = (() => {
+    if (view === 'month') return format(cursor, 'LLLL yyyy', { locale: ru });
+    if (view === 'day')   return format(cursor, 'EEEE, d MMMM yyyy', { locale: ru });
+    const sameYear  = range.from.getFullYear() === range.to.getFullYear();
+    const sameMonth = sameYear && range.from.getMonth() === range.to.getMonth();
+    if (sameMonth) return `${format(range.from, 'd', { locale: ru })} — ${format(range.to, 'd MMMM yyyy', { locale: ru })}`;
+    if (sameYear)  return `${format(range.from, 'd MMM', { locale: ru })} — ${format(range.to, 'd MMM yyyy', { locale: ru })}`;
+    return `${format(range.from, 'd MMM yyyy', { locale: ru })} — ${format(range.to, 'd MMM yyyy', { locale: ru })}`;
+  })();
 
   const newLessonAt = (date: Date, hour = 10) => {
     const start = new Date(date); start.setHours(hour, 0, 0, 0);
@@ -126,10 +130,17 @@ export default function CalendarPage() {
         actions={
           <>
             <select className="input w-56" value={filterGroup} onChange={e => setFilterGroup(e.target.value)}>
-              <option value="">Все группы</option>
+              <option value="">{isTeacher ? 'Все мои группы' : 'Все группы'}</option>
               {(groupsQ.data || []).map((g: Group) => <option key={g.id} value={g.id}>{g.name}</option>)}
             </select>
-            <button className="btn-primary" onClick={() => newLessonAt(new Date(), 10)}><Plus size={16} /> Новый урок</button>
+            <button
+              className="btn-primary"
+              onClick={() => newLessonAt(new Date(), 10)}
+              disabled={!(groupsQ.data || []).length}
+              title={(groupsQ.data || []).length ? '' : 'Нет доступных групп для создания урока'}
+            >
+              <Plus size={16} /> Новый урок
+            </button>
           </>
         }
       />

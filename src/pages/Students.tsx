@@ -10,6 +10,7 @@ import EmptyState from '@/components/ui/EmptyState';
 import { Plus, Users, Trash2, Edit3, Search, Download, ExternalLink } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { fmtDate } from '@/lib/format';
+import { useAuth } from '@/stores/auth';
 
 const STATUS_LABELS: Record<StudentStatus, { label: string; tone: string }> = {
   active:    { label: 'Учится',     tone: 'badge-green' },
@@ -25,12 +26,14 @@ const empty: Partial<Student> = {
 
 export default function StudentsPage() {
   const qc = useQueryClient();
+  const { user } = useAuth();
+  const isTeacher = user?.role === 'teacher';
   const [editing, setEditing] = useState<Partial<Student> | null>(null);
   const [q, setQ] = useState('');
 
   const { data: students = [], isLoading } = useQuery({
-    queryKey: ['students'],
-    queryFn: () => api.students.list({ orderBy: 'full_name', order: 'asc' }),
+    queryKey: isTeacher ? ['teacher-students', user?.id] : ['students'],
+    queryFn: () => isTeacher ? api.teacher.students() : api.students.list({ orderBy: 'full_name', order: 'asc' }),
   });
 
   const save = useMutation({
@@ -67,11 +70,11 @@ export default function StudentsPage() {
   return (
     <div>
       <PageHeader
-        title="Ученики"
-        subtitle="Карточки всех учеников школы"
+        title={isTeacher ? 'Мои ученики' : 'Ученики'}
+        subtitle={isTeacher ? 'Ученики из ваших групп' : 'Карточки всех учеников школы'}
         actions={<>
           <button className="btn-secondary" onClick={onExport} disabled={!filtered.length}><Download size={15} /> Экспорт CSV</button>
-          <button className="btn-primary" onClick={() => setEditing({ ...empty })}><Plus size={16} /> Добавить ученика</button>
+          {!isTeacher && <button className="btn-primary" onClick={() => setEditing({ ...empty })}><Plus size={16} /> Добавить ученика</button>}
         </>}
       />
 
@@ -123,8 +126,8 @@ export default function StudentsPage() {
                   <td className="table-td"><span className={STATUS_LABELS[s.status].tone}>{STATUS_LABELS[s.status].label}</span></td>
                   <td className="table-td text-right">
                     <Link to={`/students/${s.id}`} className="btn-ghost p-1.5 inline-flex" title="Открыть карточку"><ExternalLink size={15} /></Link>
-                    <button onClick={() => setEditing(s)} className="btn-ghost p-1.5"><Edit3 size={15} /></button>
-                    <button onClick={() => confirm(`Удалить «${s.full_name}»?`) && del.mutate(s.id)} className="btn-ghost p-1.5 text-rose-600"><Trash2 size={15} /></button>
+                    {!isTeacher && <button onClick={() => setEditing(s)} className="btn-ghost p-1.5"><Edit3 size={15} /></button>}
+                    {!isTeacher && <button onClick={() => confirm(`Удалить «${s.full_name}»?`) && del.mutate(s.id)} className="btn-ghost p-1.5 text-rose-600"><Trash2 size={15} /></button>}
                   </td>
                 </tr>
               ))}

@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import 'express-async-errors';
 import express from 'express';
 import cors from 'cors';
 import fs from 'node:fs';
@@ -6,7 +7,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pool, q, q1 } from './db.js';
 import { runMigrations } from './migrate.js';
-import { hashPassword, verifyPassword, signToken, requireAuth, requireRole } from './auth.js';
+import {
+  hashPassword, verifyPassword, signToken,
+  requireAuth, requireRole, decodeToken, invalidateUserCache,
+} from './auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,17 +29,19 @@ app.get('/api/health', async (_req, res) => {
   }
 });
 
+// Empty string -> NULL (so PATCH with "" doesn't blank out existing values)
+const blank = (v: any) => (typeof v === 'string' && v.trim() === '') ? null : v;
+
 // ============================================================
 // AUTH
 // ============================================================
-import { decodeToken } from './auth.js';
-
 async function countUsers() {
   const r = await q1<{ c: number | string }>('select count(*)::int as c from users');
   return Number(r?.c ?? 0);
 }
 
-// Bootstrap probe — frontend uses it to decide whether to show public registration
+let bootstrapLock = false;
+
 app.get('/api/auth/can-register-public', async (_req, res) => {
   res.json({ allowed: (await countUsers()) === 0 });
 });
@@ -44,12 +50,12 @@ app.post('/api/auth/register', async (req, res) => {
   const { email, password, full_name, role } = req.body || {};
   if (!email || !password) return res.status(400).json({ error: 'email и пароль обязательны' });
   if (password.length < 6) return res.status(400).json({ error: 'пароль минимум 6 символов' });
+  if (!/^.+@.+\..+$/.test(String(email))) return res.status(400).json({ error: 'некорректный email' });
   const validRoles = ['admin', 'manager', 'teacher'];
   const r = validRoles.includes(role) ? role : 'manager';
 
   const hasUsers = (await countUsers()) > 0;
 
-  // After bootstrap: only admin can register new users
   if (hasUsers) {
     const h = req.headers.authorization || '';
     const token = h.startsWith('Bearer ') ? h.slice(7) : '';
@@ -59,27 +65,33 @@ app.post('/api/auth/register', async (req, res) => {
     } catch {
       return res.status(403).json({ error: 'Регистрация закрыта. Обратитесь к администратору.' });
     }
+  } else {
+    // Bootstrap race guard — only one concurrent caller wins
+    if (bootstrapLock) return res.status(409).json({ error: 'Регистрация уже выполняется' });
+    bootstrapLock = true;
   }
 
-  const finalRole = hasUsers ? r : 'admin'; // first user is always admin
+  try {
+    const finalRole = hasUsers ? r : 'admin';
+    const exists = await q1('select id from users where email = $1', [email.toLowerCase()]);
+    if (exists) return res.status(409).json({ error: 'Пользователь с таким email уже существует' });
 
-  const exists = await q1('select id from users where email = $1', [email.toLowerCase()]);
-  if (exists) return res.status(409).json({ error: 'Пользователь с таким email уже существует' });
+    const hash = await hashPassword(password);
+    const user = await q1<any>(
+      `insert into users (email, password_hash, full_name, role)
+       values ($1, $2, $3, $4)
+       returning id, email, full_name, role, phone, is_active, created_at`,
+      [email.toLowerCase(), hash, full_name || email, finalRole],
+    );
+    if (!user) return res.status(500).json({ error: 'не удалось создать пользователя' });
 
-  const hash = await hashPassword(password);
-  const user = await q1<any>(
-    `insert into users (email, password_hash, full_name, role)
-     values ($1, $2, $3, $4)
-     returning id, email, full_name, role, phone, is_active, created_at`,
-    [email.toLowerCase(), hash, full_name || email, finalRole],
-  );
-  if (!user) return res.status(500).json({ error: 'не удалось создать пользователя' });
+    if (hasUsers) return res.json({ user });
 
-  // If created by admin via authenticated request — don't return a token (admin keeps own session)
-  if (hasUsers) return res.json({ user });
-
-  const token = signToken({ uid: user.id, role: user.role });
-  res.json({ token, user });
+    const tok = signToken({ uid: user.id, role: user.role });
+    res.json({ token: tok, user });
+  } finally {
+    if (!hasUsers) bootstrapLock = false;
+  }
 });
 
 app.post('/api/auth/login', async (req, res) => {
@@ -100,7 +112,7 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.get('/api/auth/me', requireAuth, async (req, res) => {
   const user = await q1(
-    'select id, email, full_name, role, phone, is_active, created_at, updated_at from users where id = $1',
+    'select id, email, full_name, role, phone, specialty, workplace, is_active, created_at, updated_at from users where id = $1',
     [req.user!.uid],
   );
   if (!user) return res.status(404).json({ error: 'not found' });
@@ -110,11 +122,15 @@ app.get('/api/auth/me', requireAuth, async (req, res) => {
 app.patch('/api/auth/me', requireAuth, async (req, res) => {
   const { full_name, phone } = req.body || {};
   const user = await q1(
-    `update users set full_name = coalesce($1, full_name), phone = coalesce($2, phone), updated_at = now()
+    `update users set
+        full_name = coalesce(nullif($1, ''), full_name),
+        phone     = coalesce(nullif($2, ''), phone),
+        updated_at = now()
      where id = $3
-     returning id, email, full_name, role, phone, is_active`,
-    [full_name ?? null, phone ?? null, req.user!.uid],
+     returning id, email, full_name, role, phone, specialty, workplace, is_active`,
+    [blank(full_name), blank(phone), req.user!.uid],
   );
+  invalidateUserCache(req.user!.uid);
   res.json(user);
 });
 
@@ -142,6 +158,16 @@ interface ResourceOpts {
   write?: Role[];
 }
 
+const BOOL_FIELDS = new Set(['is_active','is_canceled']);
+
+function castParam(field: string, value: any) {
+  if (BOOL_FIELDS.has(field)) {
+    if (value === 'true' || value === true) return true;
+    if (value === 'false' || value === false) return false;
+  }
+  return value;
+}
+
 function resource({ table, fields, defaultOrder = 'created_at', read = ['admin','manager','teacher'], write = ['admin','manager'] }: ResourceOpts) {
   const router = express.Router();
   router.use(requireAuth);
@@ -149,29 +175,27 @@ function resource({ table, fields, defaultOrder = 'created_at', read = ['admin',
   router.get('/', requireRole(...read), async (req, res) => {
     const { orderBy = defaultOrder, order = 'desc', limit = '500', search, ...rest } = req.query as Record<string, string>;
     const safeOrder = order === 'asc' ? 'asc' : 'desc';
-    const safeCol = fields.includes(orderBy) ? orderBy : defaultOrder;
+    const safeCol = fields.includes(String(orderBy)) ? String(orderBy) : defaultOrder;
     const where: string[] = [];
     const params: any[] = [];
 
-    // simple eq filters: any allowed field as ?field=value
     for (const [k, v] of Object.entries(rest)) {
       if (!fields.includes(k)) continue;
-      params.push(v);
+      params.push(castParam(k, v));
       where.push(`${k} = $${params.length}`);
     }
 
-    // ILIKE search on full_name + name + description if present
     if (search) {
-      const cols = ['full_name', 'name', 'description', 'topic'].filter(c => fields.includes(c));
+      const cols = ['full_name','name','description','topic','title'].filter(c => fields.includes(c));
       if (cols.length) {
         params.push(`%${search}%`);
         where.push('(' + cols.map(c => `${c} ilike $${params.length}`).join(' or ') + ')');
       }
     }
 
-    const lim = Math.min(Number(limit) || 500, 2000);
+    const lim = Math.min(Math.max(Number(limit) || 500, 1), 2000);
     const sql = `select * from ${table} ${where.length ? 'where ' + where.join(' and ') : ''}
-                 order by ${safeCol} ${safeOrder} limit ${lim}`;
+                 order by ${safeCol} ${safeOrder} nulls last limit ${lim}`;
     const rows = await q(sql, params);
     res.json(rows);
   });
@@ -205,7 +229,8 @@ function resource({ table, fields, defaultOrder = 'created_at', read = ['admin',
   });
 
   router.delete('/:id', requireRole(...write), async (req, res) => {
-    await pool.query(`delete from ${table} where id = $1`, [req.params.id]);
+    const result = await pool.query(`delete from ${table} where id = $1`, [req.params.id]);
+    if (result.rowCount === 0) return res.status(404).json({ error: 'not found' });
     res.status(204).end();
   });
 
@@ -254,7 +279,7 @@ app.use('/api/payments', resource({
   read: ['admin','manager'], write: ['admin','manager'],
 }));
 
-// Tasks: auto-default assigned_to and created_by to the calling user
+// Tasks: auto-default assigned_to and created_by; check ownership for mutations
 app.post('/api/tasks', requireAuth, (req, _res, next) => {
   if (req.body) {
     if (!req.body.assigned_to) req.body.assigned_to = req.user!.uid;
@@ -262,6 +287,19 @@ app.post('/api/tasks', requireAuth, (req, _res, next) => {
   }
   next();
 });
+
+async function ensureTaskOwner(req: any, res: any, next: any) {
+  if (req.user?.role === 'admin') return next();
+  const row = await q1<{ id: string }>(
+    'select id from tasks where id = $1 and (assigned_to = $2 or created_by = $2)',
+    [req.params.id, req.user!.uid],
+  );
+  if (!row) return res.status(403).json({ error: 'Это не ваша задача' });
+  next();
+}
+app.patch('/api/tasks/:id', requireAuth, ensureTaskOwner);
+app.delete('/api/tasks/:id', requireAuth, ensureTaskOwner);
+
 app.use('/api/tasks', resource({
   table: 'tasks',
   fields: ['title','description','kind','status','priority','due_at','assigned_to','created_by','related_type','related_id','completed_at'],
@@ -270,7 +308,7 @@ app.use('/api/tasks', resource({
 }));
 
 // ============================================================
-// USERS (custom — role gating, no password fields exposed)
+// USERS (admin-only writes; teachers cannot edit anyone)
 // ============================================================
 const userFields = 'id, email, full_name, role, phone, specialty, workplace, is_active, created_at, updated_at';
 
@@ -279,32 +317,38 @@ app.get('/api/users', requireAuth, async (_req, res) => {
   res.json(rows);
 });
 
-app.patch('/api/users/:id', requireAuth, requireRole('admin', 'manager'), async (req, res) => {
+app.patch('/api/users/:id', requireAuth, requireRole('admin'), async (req, res) => {
   const { full_name, phone, role, is_active, specialty, workplace, email } = req.body || {};
   if (role && !['admin','manager','teacher'].includes(role)) return res.status(400).json({ error: 'invalid role' });
-  const isAdmin = req.user?.role === 'admin';
-  const safeRole = isAdmin ? (role ?? null) : null;
-  const safeActive = isAdmin ? (is_active ?? null) : null;
-  const safeEmail = isAdmin && email ? String(email).toLowerCase() : null;
+  if (email && !/^.+@.+\..+$/.test(String(email))) return res.status(400).json({ error: 'некорректный email' });
+
   const row = await q1(
     `update users set
-        full_name  = coalesce($1, full_name),
-        phone      = coalesce($2, phone),
+        full_name  = coalesce(nullif($1, ''), full_name),
+        phone      = coalesce(nullif($2, ''), phone),
         role       = coalesce($3, role),
         is_active  = coalesce($4, is_active),
-        specialty  = coalesce($5, specialty),
-        workplace  = coalesce($6, workplace),
-        email      = coalesce($7, email),
+        specialty  = coalesce(nullif($5, ''), specialty),
+        workplace  = coalesce(nullif($6, ''), workplace),
+        email      = coalesce(nullif($7, ''), email),
         updated_at = now()
      where id = $8 returning ${userFields}`,
-    [full_name ?? null, phone ?? null, safeRole, safeActive, specialty ?? null, workplace ?? null, safeEmail, req.params.id],
+    [
+      blank(full_name), blank(phone), role ?? null, is_active ?? null,
+      blank(specialty), blank(workplace), email ? String(email).toLowerCase() : null,
+      req.params.id,
+    ],
   );
+  if (!row) return res.status(404).json({ error: 'not found' });
+  invalidateUserCache(req.params.id);
   res.json(row);
 });
 
 app.delete('/api/users/:id', requireAuth, requireRole('admin'), async (req, res) => {
   if (req.params.id === req.user?.uid) return res.status(400).json({ error: 'нельзя удалить самого себя' });
-  await pool.query('delete from users where id = $1', [req.params.id]);
+  const result = await pool.query('delete from users where id = $1', [req.params.id]);
+  if (result.rowCount === 0) return res.status(404).json({ error: 'not found' });
+  invalidateUserCache(req.params.id);
   res.status(204).end();
 });
 
@@ -338,7 +382,7 @@ app.get('/api/students/:id/profile', requireAuth, async (req, res) => {
   const paid =
     payments.filter(p => p.kind === 'income').reduce((s, p) => s + Number(p.amount), 0)
     - payments.filter(p => p.kind === 'refund').reduce((s, p) => s + Number(p.amount), 0);
-  const monthlyCharge = groups.reduce((s, g) => s + Number(g.monthly_fee), 0);
+  const monthlyCharge = groups.reduce((s, g) => s + Number(g.monthly_fee || 0), 0);
 
   const total = attendance.length;
   const presentCount = attendance.filter(a => a.status === 'present' || a.status === 'late').length;
@@ -379,8 +423,6 @@ app.get('/api/teacher/dashboard', requireAuth, async (req, res) => {
     [groupIds],
   );
 
-  const todayLessons = week.filter(l => String(l.starts_at).slice(0,10) === new Date().toISOString().slice(0,10));
-
   const studentRow = groupIds.length === 0 ? null : await q1<{ c: number | string }>(
     `select count(distinct student_id)::int as c
      from group_students where group_id = any($1::uuid[])`,
@@ -409,11 +451,25 @@ app.get('/api/teacher/dashboard', requireAuth, async (req, res) => {
   res.json({
     groups,
     week,
-    todayLessons,
     studentCount: Number(studentRow?.c ?? 0),
     attendance30: recentAttendance,
     myTasks,
   });
+});
+
+// Students visible to a teacher = those enrolled in their groups
+app.get('/api/teacher/students', requireAuth, async (req, res) => {
+  const uid = req.user!.uid;
+  const rows = await q(
+    `select distinct s.*
+     from students s
+     join group_students gs on gs.student_id = s.id
+     join groups g on g.id = gs.group_id
+     where g.teacher_id = $1
+     order by s.full_name`,
+    [uid],
+  );
+  res.json(rows);
 });
 
 // ============================================================
@@ -504,6 +560,21 @@ app.put('/api/lessons/:id/attendance', requireAuth, async (req, res) => {
   const { student_id, status, score, comment } = req.body || {};
   if (!student_id || !status) return res.status(400).json({ error: 'student_id и status обязательны' });
   if (!['present','absent','late','excused'].includes(status)) return res.status(400).json({ error: 'invalid status' });
+  if (score != null && (typeof score !== 'number' || score < 0 || score > 100)) {
+    return res.status(400).json({ error: 'оценка должна быть числом 0-100' });
+  }
+
+  // Teacher can only mark their own group's lessons
+  if (req.user!.role === 'teacher') {
+    const owns = await q1(
+      `select 1 from lessons l
+       join groups g on g.id = l.group_id
+       where l.id = $1 and g.teacher_id = $2`,
+      [req.params.id, req.user!.uid],
+    );
+    if (!owns) return res.status(403).json({ error: 'Это не ваш урок' });
+  }
+
   const row = await q1(
     `insert into attendance (lesson_id, student_id, status, score, comment, recorded_by, recorded_at)
      values ($1, $2, $3, $4, $5, $6, now())
@@ -514,7 +585,7 @@ app.put('/api/lessons/:id/attendance', requireAuth, async (req, res) => {
        recorded_by = excluded.recorded_by,
        recorded_at = excluded.recorded_at
      returning *`,
-    [req.params.id, student_id, status, score ?? null, comment ?? null, req.user!.uid],
+    [req.params.id, student_id, status, score ?? null, blank(comment), req.user!.uid],
   );
   res.json(row);
 });
@@ -579,8 +650,8 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
 app.get('/api/reports/monthly', requireAuth, requireRole('admin','manager'), async (_req, res) => {
   const rows = await q(
     `select to_char(date_trunc('month', paid_at), 'YYYY-MM') as month,
-            sum(amount) filter (where kind = 'income')::float as income,
-            sum(amount) filter (where kind in ('expense','payout','refund'))::float as expense
+            coalesce(sum(amount) filter (where kind = 'income'), 0)::float as income,
+            coalesce(sum(amount) filter (where kind in ('expense','payout','refund')), 0)::float as expense
      from payments
      where paid_at >= now() - interval '12 months'
      group by 1 order by 1`,
@@ -599,6 +670,7 @@ app.get('/api/reports/group-revenue', requireAuth, requireRole('admin','manager'
             (select count(*) from group_students where group_id = g.id)::int as students,
             ((select count(*) from group_students where group_id = g.id) * g.monthly_fee)::float as revenue
      from groups g
+     where g.is_active = true
      order by revenue desc nulls last
      limit 10`,
   );
@@ -618,11 +690,15 @@ if (fs.existsSync(distPath)) {
 }
 
 // ============================================================
-// ERROR HANDLER
+// 404 + ERROR HANDLER
 // ============================================================
+app.use('/api/*', (_req, res) => {
+  res.status(404).json({ error: 'not found' });
+});
+
 app.use((err: any, _req: any, res: any, _next: any) => {
   console.error('[error]', err);
-  res.status(500).json({ error: err?.message || 'Internal error' });
+  res.status(err?.status || 500).json({ error: err?.message || 'Internal error' });
 });
 
 // ============================================================

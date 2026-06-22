@@ -194,7 +194,10 @@ export default function TasksPage() {
                       {t.description && <div className="text-sm text-slate-600 mt-1 whitespace-pre-wrap">{t.description}</div>}
                     </div>
                     <div className="flex items-center gap-1 flex-shrink-0">
-                      <button onClick={() => setEditing({ ...t, due_at: t.due_at ? t.due_at.slice(0,16) : null })} className="btn-ghost p-1.5"><Edit3 size={15} /></button>
+                      <button onClick={() => setEditing({
+                        ...t,
+                        due_at: t.due_at ? (t.kind === 'plan' ? t.due_at.slice(0, 10) : t.due_at.slice(0, 16)) : null,
+                      })} className="btn-ghost p-1.5"><Edit3 size={15} /></button>
                       <button onClick={() => confirm('Удалить?') && del.mutate(t.id)} className="btn-ghost p-1.5 text-rose-600"><Trash2 size={15} /></button>
                     </div>
                   </div>

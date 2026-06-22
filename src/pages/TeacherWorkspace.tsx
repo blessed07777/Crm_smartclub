@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
@@ -28,9 +28,16 @@ export default function TeacherWorkspace() {
   const attPresent = (data?.attendance30 || []).filter(r => r.status === 'present' || r.status === 'late').reduce((s, r) => s + r.n, 0);
   const attPct = attTotal ? Math.round((attPresent / attTotal) * 100) : null;
 
-  // Week grouped by day
+  // Week grouped by day; "today" filter computed client-side in user's TZ (was UTC-comparing on server)
   const week = (data?.week || []);
-  const days = Array.from(new Set(week.map(l => String(l.starts_at).slice(0, 10)))).sort();
+  const todayLessons = useMemo(
+    () => week.filter(l => isSameDay(parseISO(l.starts_at), new Date())),
+    [week],
+  );
+  const days = useMemo(
+    () => Array.from(new Set(week.map(l => format(parseISO(l.starts_at), 'yyyy-MM-dd')))).sort(),
+    [week],
+  );
 
   return (
     <div>
@@ -43,7 +50,7 @@ export default function TeacherWorkspace() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <StatCard label="Моих групп" value={data?.groups.length ?? '—'} icon={<GraduationCap size={20} />} tone="brand" />
         <StatCard label="Учеников всего" value={data?.studentCount ?? '—'} icon={<Users size={20} />} tone="emerald" />
-        <StatCard label="Сегодня уроков" value={data?.todayLessons.length ?? '—'} icon={<CalendarDays size={20} />} tone="amber" />
+        <StatCard label="Сегодня уроков" value={todayLessons.length} icon={<CalendarDays size={20} />} tone="amber" />
         <StatCard label="Посещаемость 30 дн." value={attPct != null ? `${attPct}%` : '—'} hint={`отмечено ${attTotal} раз`} icon={<ClipboardCheck size={20} />} tone="rose" />
       </div>
 
@@ -52,11 +59,11 @@ export default function TeacherWorkspace() {
         <h3 className="font-semibold mb-4 flex items-center gap-2">
           <CalendarDays size={18} className="text-brand-600" /> Сегодня
         </h3>
-        {(data?.todayLessons || []).length === 0 ? (
+        {todayLessons.length === 0 ? (
           <div className="text-sm text-slate-500 py-3">Сегодня нет занятий 🌿</div>
         ) : (
           <ul className="divide-y divide-slate-100">
-            {(data?.todayLessons || []).map(l => {
+            {todayLessons.map(l => {
               const past = isBefore(parseISO(l.ends_at), new Date());
               return (
                 <li key={l.id} className="py-3 flex flex-wrap items-center justify-between gap-3">

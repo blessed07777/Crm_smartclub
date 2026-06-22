@@ -2,6 +2,9 @@ import type { Profile, Subject, Lead, Student, Group, Lesson, Payment, Attendanc
 
 const TOKEN_KEY = 'smartclub_token';
 
+// Soft singleton — exposed via api.on401 so app can wire it to navigation/store reset
+let on401Handler: (() => void) | null = null;
+
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem(TOKEN_KEY);
   const headers: Record<string, string> = {
@@ -14,6 +17,11 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   const text = await res.text();
   const json = text ? JSON.parse(text) : null;
   if (!res.ok) {
+    if (res.status === 401) {
+      // Token expired / invalid — wipe and notify
+      localStorage.removeItem(TOKEN_KEY);
+      if (on401Handler) on401Handler();
+    }
     const msg = json?.error || res.statusText || `HTTP ${res.status}`;
     throw new Error(msg);
   }
@@ -65,6 +73,9 @@ export const api = {
     clear:() => localStorage.removeItem(TOKEN_KEY),
   },
 
+  // Allow app to subscribe to 401 events (auto-redirect to /login)
+  on401: (cb: () => void) => { on401Handler = cb; },
+
   auth: {
     canRegisterPublic: () => call<{ allowed: boolean }>('/api/auth/can-register-public'),
     login:    (email: string, password: string) =>
@@ -82,9 +93,7 @@ export const api = {
     list: () => call<Profile[]>('/api/users'),
   },
   subjects: crud<Subject>('/api/subjects'),
-  leads:    {
-    ...crud<Lead>('/api/leads'),
-  },
+  leads:    crud<Lead>('/api/leads'),
   students: {
     ...crud<Student>('/api/students'),
     profile: (id: string) => call<StudentProfile>(`/api/students/${id}/profile`),
@@ -128,11 +137,11 @@ export const api = {
     dashboard: () => call<{
       groups: (Group & { subject_name: string | null; subject_color: string | null; students_count: number })[];
       week: (Lesson & { group_name: string })[];
-      todayLessons: (Lesson & { group_name: string })[];
       studentCount: number;
       attendance30: { status: string; n: number }[];
       myTasks: { id: string; title: string; due_at: string | null; priority: string; status: string; kind: string }[];
     }>('/api/teacher/dashboard'),
+    students: () => call<Student[]>('/api/teacher/students'),
   },
 
   reports: {
