@@ -9,7 +9,7 @@ import Modal from '@/components/ui/Modal';
 import StatCard from '@/components/ui/StatCard';
 import {
   ArrowLeft, Edit3, Trash2, GraduationCap, Wallet, TrendingUp, TrendingDown,
-  ClipboardCheck, Phone, User, School, CalendarDays, Plus, Download, Target,
+  ClipboardCheck, Phone, User, School, CalendarDays, Plus, Download, Target, ExternalLink,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { fmtDate, fmtDateTime, fmtMoney } from '@/lib/format';
@@ -164,16 +164,18 @@ export default function StudentDetailPage() {
         ) : (
           <div className="divide-y divide-slate-100">
             {data.groups.map(g => (
-              <div key={g.id} className="px-5 py-3 flex items-center justify-between">
+              <Link to={`/groups/${g.id}`} key={g.id} className="px-5 py-3 flex items-center justify-between hover:bg-slate-50 transition">
                 <div>
-                  <div className="font-medium text-slate-900">{g.name}</div>
+                  <div className="font-medium text-slate-900 inline-flex items-center gap-1">
+                    {g.name} <ExternalLink size={11} className="text-slate-400" />
+                  </div>
                   <div className="text-xs text-slate-500 mt-0.5">
                     <span style={{ color: g.subject_color || '#6366f1' }}>●</span> {g.subject_name || 'Без предмета'}
                     {g.teacher_name ? ` · ${g.teacher_name}` : ''}
                   </div>
                 </div>
                 <div className="text-sm font-semibold">{fmtMoney(Number(g.monthly_fee))}/мес</div>
-              </div>
+              </Link>
             ))}
           </div>
         )}

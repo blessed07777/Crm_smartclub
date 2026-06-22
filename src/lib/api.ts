@@ -58,6 +58,36 @@ export interface StudentProfile {
   avgScore: number | null;
 }
 
+export interface GroupProfile {
+  group: Group & {
+    subject_name: string | null;
+    subject_color: string | null;
+    teacher_id: string | null;
+    teacher_name: string | null;
+    teacher_specialty: string | null;
+  };
+  students: (Student & { joined_at: string })[];
+  lessons: Lesson[];
+  payments: (Payment & { student_name: string | null })[];
+  stats: {
+    upcomingLessons: number;
+    pastLessons: number;
+    totalIncome: number;
+    monthlyExpected: number;
+    attendancePct: number | null;
+  };
+}
+
+export interface UserProfile {
+  user: Profile;
+  groups: (Group & { subject_name: string | null; subject_color: string | null; students_count: number })[];
+  studentCount: number;
+  lessonStats: { past30: number; upcoming30: number } | null;
+  payouts: Payment[];
+  leads: { status: string; count: number }[];
+  tasks: { id: string; title: string; kind: string; status: string; priority: string; due_at: string | null }[];
+}
+
 export interface ManagerStats {
   byStatus: { status: string; count: number; value: number }[];
   monthSummary: { won_month: number; created_month: number; revenue_month: number } | null;
@@ -91,15 +121,24 @@ export const api = {
   users: {
     ...crud<Profile>('/api/users'),
     list: () => call<Profile[]>('/api/users'),
+    profile: (id: string) => call<UserProfile>(`/api/users/${id}/profile`),
   },
   subjects: crud<Subject>('/api/subjects'),
-  leads:    crud<Lead>('/api/leads'),
+  leads:    {
+    ...crud<Lead>('/api/leads'),
+    convert: (id: string, data: { group_id?: string | null; first_payment?: number; school?: string; target_score?: number | null }) =>
+      call<{ student: Student; payment: Payment | null; lead_id: string }>(`/api/leads/${id}/convert`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+  },
   students: {
     ...crud<Student>('/api/students'),
     profile: (id: string) => call<StudentProfile>(`/api/students/${id}/profile`),
   },
   groups:   {
     ...crud<Group>('/api/groups'),
+    profile: (id: string) => call<GroupProfile>(`/api/groups/${id}/profile`),
     roster: (id: string) => call<Student[]>(`/api/groups/${id}/roster`),
     addStudent: (groupId: string, student_id: string) =>
       call<{ ok: true }>(`/api/groups/${groupId}/roster`, { method: 'POST', body: JSON.stringify({ student_id }) }),

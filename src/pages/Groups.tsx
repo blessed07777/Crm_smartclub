@@ -5,7 +5,8 @@ import type { Group, Subject, Profile, Student } from '@/types/database';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
 import EmptyState from '@/components/ui/EmptyState';
-import { Plus, GraduationCap, Trash2, Edit3, Users, Download } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Plus, GraduationCap, Trash2, Edit3, Users, Download, ExternalLink } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { fmtMoney } from '@/lib/format';
 import { exportCSV } from '@/lib/csv';
@@ -91,24 +92,34 @@ export default function GroupsPage() {
               <div key={g.id} className="card p-5">
                 <div className="flex items-start justify-between mb-3">
                   <div>
-                    <div className="font-semibold text-slate-900">{g.name}</div>
+                    <Link to={`/groups/${g.id}`} className="font-semibold text-slate-900 hover:text-brand-700 inline-flex items-center gap-1">
+                      {g.name} <ExternalLink size={12} className="text-slate-400" />
+                    </Link>
                     <div className="text-xs text-slate-500 mt-0.5">
                       <span style={{ color: subj?.color || '#6366f1' }}>●</span> {subj?.name || 'Без предмета'}
                     </div>
                   </div>
-                  <div className="flex gap-1">
-                    <button onClick={() => setEditing(g)} className="btn-ghost p-1.5"><Edit3 size={15} /></button>
-                    <button onClick={() => confirm('Удалить группу?') && del.mutate(g.id)} className="btn-ghost p-1.5 text-rose-600"><Trash2 size={15} /></button>
-                  </div>
+                  {!isTeacher && (
+                    <div className="flex gap-1">
+                      <button onClick={() => setEditing(g)} className="btn-ghost p-1.5"><Edit3 size={15} /></button>
+                      <button onClick={() => confirm('Удалить группу?') && del.mutate(g.id)} className="btn-ghost p-1.5 text-rose-600"><Trash2 size={15} /></button>
+                    </div>
+                  )}
                 </div>
                 <div className="text-sm text-slate-600 space-y-1">
-                  <div>Преподаватель: <b className="text-slate-900">{teacher?.full_name || '—'}</b></div>
+                  <div>Преподаватель: {teacher
+                    ? <Link to={`/teachers/${teacher.id}`} className="text-brand-700 hover:underline font-medium">{teacher.full_name}</Link>
+                    : <b className="text-slate-900">—</b>}
+                  </div>
                   <div>Стоимость: <b className="text-slate-900">{fmtMoney(g.monthly_fee)}/мес</b></div>
                   <div>Расписание: {g.schedule_summary || '—'}</div>
                 </div>
-                <button className="btn-secondary w-full mt-4" onClick={() => setRosterFor(g)}>
-                  <Users size={15} /> Состав группы
-                </button>
+                <div className="flex gap-2 mt-4">
+                  <Link to={`/groups/${g.id}`} className="btn-primary flex-1 justify-center">Открыть</Link>
+                  <button className="btn-secondary" onClick={() => setRosterFor(g)} title="Быстрое управление составом">
+                    <Users size={15} />
+                  </button>
+                </div>
               </div>
             );
           })}

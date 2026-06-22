@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { exportCSV } from '@/lib/csv';
@@ -112,16 +113,25 @@ export default function FinancePage() {
           </thead>
           <tbody>
             {list.map(p => {
-              const who = p.student_id ? studentsQ.data?.find((s: Student) => s.id === p.student_id)?.full_name
-                        : p.teacher_id ? usersQ.data?.find((t: Profile) => t.id === p.teacher_id)?.full_name
-                        : p.group_id   ? groupsQ.data?.find((g: Group) => g.id === p.group_id)?.name
-                        : (p.category || '—');
+              let whoLink: React.ReactNode = '—';
+              if (p.student_id) {
+                const s = studentsQ.data?.find((x: Student) => x.id === p.student_id);
+                whoLink = s ? <Link to={`/students/${s.id}`} className="text-brand-700 hover:underline">{s.full_name}</Link> : '—';
+              } else if (p.teacher_id) {
+                const t = usersQ.data?.find((x: Profile) => x.id === p.teacher_id);
+                whoLink = t ? <Link to={`/teachers/${t.id}`} className="text-brand-700 hover:underline">{t.full_name}</Link> : '—';
+              } else if (p.group_id) {
+                const g = groupsQ.data?.find((x: Group) => x.id === p.group_id);
+                whoLink = g ? <Link to={`/groups/${g.id}`} className="text-brand-700 hover:underline">{g.name}</Link> : '—';
+              } else {
+                whoLink = p.category || '—';
+              }
               return (
                 <tr key={p.id} className="hover:bg-slate-50">
                   <td className="table-td">{fmtDate(p.paid_at)}</td>
                   <td className="table-td"><span className={KIND_LABEL[p.kind].tone}>{KIND_LABEL[p.kind].label}</span></td>
                   <td className="table-td font-semibold">{fmtMoney(Number(p.amount), p.currency)}</td>
-                  <td className="table-td">{who}</td>
+                  <td className="table-td">{whoLink}</td>
                   <td className="table-td">{p.description || '—'}</td>
                   <td className="table-td text-right">
                     <button onClick={() => confirm('Удалить транзакцию?') && del.mutate(p.id)} className="btn-ghost p-1.5 text-rose-600"><Trash2 size={15} /></button>

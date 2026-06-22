@@ -394,6 +394,200 @@ app.get('/api/students/:id/profile', requireAuth, async (req, res) => {
 });
 
 // ============================================================
+// LEAD → STUDENT CONVERSION (one click from kanban)
+// ============================================================
+app.post('/api/leads/:id/convert', requireAuth, requireRole('admin','manager'), async (req, res) => {
+  const { group_id, first_payment, school, target_score } = req.body || {};
+  const lead = await q1<any>('select * from leads where id = $1', [req.params.id]);
+  if (!lead) return res.status(404).json({ error: 'Лид не найден' });
+
+  // Pull a connection from the pool so the whole conversion is one transaction
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+
+    const noteParts = [];
+    noteParts.push(`Конвертирован из лида · ${new Date().toISOString().slice(0,10)}`);
+    if (lead.source) noteParts.push(`Источник: ${lead.source}`);
+    if (lead.note)   noteParts.push(`\n${lead.note}`);
+
+    const sres = await client.query(
+      `insert into students
+         (full_name, phone, parent_name, parent_phone, grade, school, target_score, note, status, enrolled_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,'active', current_date)
+       returning *`,
+      [
+        lead.full_name, lead.phone, lead.parent_name, lead.parent_phone,
+        lead.grade, blank(school), target_score ?? null,
+        noteParts.join('\n'),
+      ],
+    );
+    const student = sres.rows[0];
+
+    if (group_id) {
+      await client.query(
+        `insert into group_students(group_id, student_id) values ($1, $2) on conflict do nothing`,
+        [group_id, student.id],
+      );
+    }
+
+    let payment = null;
+    if (first_payment && Number(first_payment) > 0) {
+      const pres = await client.query(
+        `insert into payments
+           (kind, amount, currency, student_id, group_id, method, description, paid_at, created_by)
+         values ('income', $1, 'KZT', $2, $3, 'Каспи', 'Первая оплата (конвертация лида)', current_date, $4)
+         returning *`,
+        [Number(first_payment), student.id, group_id || null, req.user!.uid],
+      );
+      payment = pres.rows[0];
+    }
+
+    await client.query(
+      `update leads set status = 'won', updated_at = now() where id = $1`,
+      [req.params.id],
+    );
+
+    await client.query('commit');
+    res.json({ student, payment, lead_id: req.params.id });
+  } catch (e) {
+    await client.query('rollback');
+    throw e;
+  } finally {
+    client.release();
+  }
+});
+
+// ============================================================
+// GROUP PROFILE (full card with roster, lessons, payments)
+// ============================================================
+app.get('/api/groups/:id/profile', requireAuth, async (req, res) => {
+  const id = req.params.id;
+  const group = await q1<any>(
+    `select g.*,
+            sub.name as subject_name, sub.color as subject_color,
+            u.id as teacher_id, u.full_name as teacher_name, u.specialty as teacher_specialty
+     from groups g
+     left join subjects sub on sub.id = g.subject_id
+     left join users u on u.id = g.teacher_id
+     where g.id = $1`,
+    [id],
+  );
+  if (!group) return res.status(404).json({ error: 'not found' });
+
+  const [students, lessons, payments, attCounts] = await Promise.all([
+    q<any>(
+      `select s.*, gs.joined_at
+       from group_students gs
+       join students s on s.id = gs.student_id
+       where gs.group_id = $1 order by s.full_name`, [id],
+    ),
+    q<any>(
+      `select l.* from lessons l
+       where l.group_id = $1
+       order by l.starts_at desc limit 60`, [id],
+    ),
+    q<any>(
+      `select p.*, s.full_name as student_name
+       from payments p
+       left join students s on s.id = p.student_id
+       where p.group_id = $1
+       order by p.paid_at desc limit 30`, [id],
+    ),
+    q<any>(
+      `select a.status, count(*)::int as n
+       from attendance a
+       join lessons l on l.id = a.lesson_id
+       where l.group_id = $1
+         and l.starts_at >= now() - interval '90 days'
+       group by a.status`, [id],
+    ),
+  ]);
+
+  const now = new Date();
+  const upcomingLessons = lessons.filter(l => new Date(l.starts_at) > now).length;
+  const pastLessons     = lessons.length - upcomingLessons;
+  const totalIncome     = payments.filter(p => p.kind === 'income').reduce((s, p) => s + Number(p.amount), 0);
+  const monthlyExpected = students.length * Number(group.monthly_fee || 0);
+  const attTotal        = attCounts.reduce((s, r) => s + r.n, 0);
+  const attPresent      = attCounts.filter(r => r.status === 'present' || r.status === 'late').reduce((s, r) => s + r.n, 0);
+  const attendancePct   = attTotal ? Math.round((attPresent / attTotal) * 100) : null;
+
+  res.json({
+    group, students, lessons, payments,
+    stats: { upcomingLessons, pastLessons, totalIncome, monthlyExpected, attendancePct },
+  });
+});
+
+// ============================================================
+// USER (TEACHER/STAFF) PROFILE
+// ============================================================
+app.get('/api/users/:id/profile', requireAuth, async (req, res) => {
+  const id = req.params.id;
+  const user = await q1<any>(
+    `select id, email, full_name, role, phone, specialty, workplace, is_active, created_at, updated_at
+     from users where id = $1`,
+    [id],
+  );
+  if (!user) return res.status(404).json({ error: 'not found' });
+
+  let groups: any[] = [];
+  let studentCount = 0;
+  let lessonStats: any = null;
+  let payouts: any[] = [];
+  let leads: any[] = [];
+
+  if (user.role === 'teacher') {
+    groups = await q<any>(
+      `select g.*, sub.name as subject_name, sub.color as subject_color,
+              (select count(*) from group_students where group_id = g.id)::int as students_count
+       from groups g
+       left join subjects sub on sub.id = g.subject_id
+       where g.teacher_id = $1
+       order by g.is_active desc, g.name`,
+      [id],
+    );
+    const groupIds = groups.map(g => g.id);
+    if (groupIds.length) {
+      const row = await q1<{ c: number | string }>(
+        `select count(distinct student_id)::int as c from group_students where group_id = any($1::uuid[])`,
+        [groupIds],
+      );
+      studentCount = Number(row?.c ?? 0);
+      lessonStats = await q1<any>(
+        `select
+           count(*) filter (where starts_at >= now() - interval '30 days' and starts_at < now())::int as past30,
+           count(*) filter (where starts_at >= now() and starts_at < now() + interval '30 days')::int as upcoming30
+         from lessons where group_id = any($1::uuid[])`,
+        [groupIds],
+      );
+    }
+    payouts = await q<any>(
+      `select * from payments where teacher_id = $1 order by paid_at desc limit 20`,
+      [id],
+    );
+  }
+
+  if (user.role === 'manager') {
+    leads = await q<any>(
+      `select status, count(*)::int as count from leads where assigned_to = $1 group by status`,
+      [id],
+    );
+  }
+
+  const tasks = await q<any>(
+    `select id, title, kind, status, priority, due_at
+     from tasks
+     where assigned_to = $1 and status in ('open','in_progress')
+     order by case when due_at is null then 1 else 0 end, due_at asc
+     limit 10`,
+    [id],
+  );
+
+  res.json({ user, groups, studentCount, lessonStats, payouts, leads, tasks });
+});
+
+// ============================================================
 // TEACHER WORKSPACE
 // ============================================================
 app.get('/api/teacher/dashboard', requireAuth, async (req, res) => {

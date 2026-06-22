@@ -11,6 +11,8 @@ import LeadsPage from '@/pages/Leads';
 import StudentsPage from '@/pages/Students';
 import StudentDetailPage from '@/pages/StudentDetail';
 import GroupsPage from '@/pages/Groups';
+import GroupDetailPage from '@/pages/GroupDetail';
+import TeacherDetailPage from '@/pages/TeacherDetail';
 import ManagerWorkspacePage from '@/pages/ManagerWorkspace';
 import CalendarPage from '@/pages/Calendar';
 import TasksPage from '@/pages/Tasks';
@@ -47,6 +49,8 @@ export default function App() {
         <Route path="/students" element={<StudentsPage />} />
         <Route path="/students/:id" element={<StudentDetailPage />} />
         <Route path="/groups" element={<GroupsPage />} />
+        <Route path="/groups/:id" element={<GroupDetailPage />} />
+        <Route path="/teachers/:id" element={<TeacherDetailPage />} />
         <Route path="/calendar" element={<RequireAuth roles={['admin','teacher']}><CalendarPage /></RequireAuth>} />
         <Route path="/schedule" element={<RequireAuth roles={['admin']}><SchedulePage /></RequireAuth>} />
         <Route path="/attendance" element={<RequireAuth roles={['admin','teacher']}><AttendancePage /></RequireAuth>} />

@@ -1,12 +1,13 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { exportCSV } from '@/lib/csv';
-import type { Lead, LeadStatus } from '@/types/database';
+import type { Lead, LeadStatus, Group } from '@/types/database';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
 import EmptyState from '@/components/ui/EmptyState';
-import { Plus, Target, Phone, User, Trash2, Edit3, Download, Filter } from 'lucide-react';
+import { Plus, Target, Phone, User, Trash2, Edit3, Download, Filter, UserCheck } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { fmtMoney, fmtDate } from '@/lib/format';
 import { useAuth } from '@/stores/auth';
@@ -29,6 +30,7 @@ export default function LeadsPage() {
   const qc = useQueryClient();
   const { user } = useAuth();
   const [editing, setEditing] = useState<Partial<Lead> | null>(null);
+  const [converting, setConverting] = useState<Lead | null>(null);
   const [onlyMine, setOnlyMine] = useState(user?.role === 'manager');
 
   const { data: allLeads = [], isLoading } = useQuery({
@@ -112,6 +114,9 @@ export default function LeadsPage() {
                         <User size={12} className="text-slate-400" /> {l.full_name}
                       </div>
                       <div className="opacity-0 group-hover:opacity-100 flex gap-1 transition">
+                        {l.status !== 'won' && l.status !== 'lost' && (
+                          <button onClick={() => setConverting(l)} title="Зачислить в школу" className="text-slate-400 hover:text-emerald-600"><UserCheck size={13} /></button>
+                        )}
                         <button onClick={() => setEditing(l)} className="text-slate-400 hover:text-brand-600"><Edit3 size={13} /></button>
                         <button onClick={() => confirm('Удалить?') && del.mutate(l.id)} className="text-slate-400 hover:text-rose-600"><Trash2 size={13} /></button>
                       </div>
@@ -138,11 +143,21 @@ export default function LeadsPage() {
         </div>
       )}
 
+      {converting && <ConvertLeadModal lead={converting} onClose={() => setConverting(null)} onDone={() => {
+        setConverting(null);
+        qc.invalidateQueries({ queryKey: ['leads'] });
+      }} />}
+
       {editing && (
         <Modal
           open onClose={() => setEditing(null)}
           title={editing.id ? 'Редактировать лид' : 'Новый лид'}
           footer={<>
+            {editing.id && editing.status !== 'won' && editing.status !== 'lost' && (
+              <button className="btn-secondary mr-auto text-emerald-700" onClick={() => { const l = editing as Lead; setEditing(null); setConverting(l); }}>
+                <UserCheck size={14} /> Зачислить в школу
+              </button>
+            )}
             <button className="btn-secondary" onClick={() => setEditing(null)}>Отмена</button>
             <button className="btn-primary" disabled={save.isPending} onClick={() => save.mutate(editing)}>{save.isPending ? 'Сохраняем…' : 'Сохранить'}</button>
           </>}
@@ -166,5 +181,95 @@ export default function LeadsPage() {
         </Modal>
       )}
     </div>
+  );
+}
+
+function ConvertLeadModal({ lead, onClose, onDone }: { lead: Lead; onClose: () => void; onDone: () => void }) {
+  const navigate = useNavigate();
+  const [groupId, setGroupId] = useState('');
+  const [firstPayment, setFirstPayment] = useState<number>(0);
+  const [school, setSchool] = useState('');
+  const [targetScore, setTargetScore] = useState<number | ''>('');
+  const [saving, setSaving] = useState(false);
+
+  const groupsQ = useQuery({
+    queryKey: ['groups-for-convert'],
+    queryFn: () => api.groups.list({ orderBy: 'name', order: 'asc', limit: 500, is_active: 'true' }),
+  });
+  const selectedGroup = (groupsQ.data || []).find((g: Group) => g.id === groupId);
+
+  const submit = async () => {
+    setSaving(true);
+    try {
+      const { student } = await api.leads.convert(lead.id, {
+        group_id: groupId || null,
+        first_payment: firstPayment || (selectedGroup ? Number(selectedGroup.monthly_fee) : 0),
+        school,
+        target_score: targetScore === '' ? null : Number(targetScore),
+      });
+      toast.success(`${student.full_name} зачислен(а) в школу!`);
+      onDone();
+      navigate(`/students/${student.id}`);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal open onClose={onClose} title={`Зачислить «${lead.full_name}» в школу`} size="lg"
+      footer={<>
+        <button className="btn-secondary" onClick={onClose}>Отмена</button>
+        <button className="btn-primary" disabled={saving} onClick={submit}>
+          <UserCheck size={14} /> {saving ? 'Зачисляем…' : 'Зачислить и открыть карточку'}
+        </button>
+      </>}
+    >
+      <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-lg p-3 mb-4">
+        Из лида будет создана карточка ученика, статус лида сменится на <b>«Купил»</b>.
+        {' '}При выборе группы — ученик автоматически в неё добавится, и можно сразу зафиксировать первую оплату.
+      </div>
+
+      <div className="bg-slate-50 rounded-lg p-3 mb-4 text-sm">
+        <div><b>{lead.full_name}</b> · {lead.phone}</div>
+        {lead.parent_name && <div className="text-xs text-slate-600 mt-1">Родитель: {lead.parent_name} · {lead.parent_phone || '—'}</div>}
+        {lead.grade && <div className="text-xs text-slate-600">{lead.grade} класс</div>}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="label">Школа</label>
+          <input className="input" value={school} onChange={e => setSchool(e.target.value)} placeholder="напр. РФМШ" />
+        </div>
+        <div>
+          <label className="label">Цель ЕНТ (баллы)</label>
+          <input type="number" className="input" value={targetScore} onChange={e => setTargetScore(e.target.value === '' ? '' : Number(e.target.value))} />
+        </div>
+        <div className="col-span-2">
+          <label className="label">Записать в группу</label>
+          <select className="input" value={groupId} onChange={e => {
+            const v = e.target.value;
+            setGroupId(v);
+            const g = (groupsQ.data || []).find((g: Group) => g.id === v);
+            if (g && firstPayment === 0) setFirstPayment(Number(g.monthly_fee));
+          }}>
+            <option value="">— без группы (можно добавить позже) —</option>
+            {(groupsQ.data || []).map((g: Group) => (
+              <option key={g.id} value={g.id}>{g.name} · {Number(g.monthly_fee).toLocaleString('ru-RU')} ₸/мес</option>
+            ))}
+          </select>
+        </div>
+        <div className="col-span-2">
+          <label className="label">Первая оплата, ₸ <span className="text-slate-400">(0 = без оплаты)</span></label>
+          <input type="number" className="input" value={firstPayment} onChange={e => setFirstPayment(Number(e.target.value))} />
+          {selectedGroup && (
+            <div className="text-xs text-slate-500 mt-1">
+              Ставка группы: {fmtMoney(Number(selectedGroup.monthly_fee))}/мес
+            </div>
+          )}
+        </div>
+      </div>
+    </Modal>
   );
 }

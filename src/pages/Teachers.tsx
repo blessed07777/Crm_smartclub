@@ -1,11 +1,12 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type { Profile, UserRole } from '@/types/database';
 import PageHeader from '@/components/ui/PageHeader';
 import EmptyState from '@/components/ui/EmptyState';
 import Modal from '@/components/ui/Modal';
-import { UserCog, Power, UserPlus, Download, Trash2, Edit3 } from 'lucide-react';
+import { UserCog, Power, UserPlus, Download, Trash2, Edit3, ExternalLink } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { fmtDate } from '@/lib/format';
 import { exportCSV } from '@/lib/csv';
@@ -94,7 +95,11 @@ export default function TeachersPage() {
             <tbody>
               {(usersQ.data || []).map((p: Profile) => (
                 <tr key={p.id} className="hover:bg-slate-50">
-                  <td className="table-td font-medium">{p.full_name || '—'}</td>
+                  <td className="table-td font-medium">
+                    <Link to={`/teachers/${p.id}`} className="text-brand-700 hover:underline inline-flex items-center gap-1">
+                      {p.full_name || '—'} <ExternalLink size={11} className="text-slate-400" />
+                    </Link>
+                  </td>
                   <td className="table-td">
                     {isAdmin ? (
                       <select
